@@ -10,11 +10,14 @@ import {
   Gauge,
   Link as LinkIcon,
   Monitor,
+  Pause,
   Play,
   Plus,
   RefreshCcw,
+  Settings,
   ShieldAlert,
   Smartphone,
+  Square,
   Trophy,
   Vote,
 } from "lucide-react";
@@ -23,7 +26,7 @@ import "./styles.css";
 type View = "player" | "tv" | "admin";
 type Difficulty = "easy" | "medium" | "hard";
 type CategoryKey = "general" | "geography" | "movies" | "music" | "sports" | "science" | "history" | "ghana";
-type Phase = "vote" | "ready" | "active" | "closed" | "reveal" | "finished";
+type Phase = "vote" | "ready" | "active" | "paused" | "closed" | "reveal" | "finished";
 type CategoryMeta = { label: string; accent: string };
 type Team = {
   id: string;
@@ -32,6 +35,9 @@ type Team = {
   score: number;
   answeredQuestionId?: string;
   violations: number;
+  reconnects: number;
+  lastSeenAt?: number;
+  lastViolationAt?: number;
   disqualified?: boolean;
 };
 type PublicQuestion = {
@@ -53,8 +59,13 @@ type EventState = {
   selectedCategory: CategoryKey;
   difficulty: Difficulty;
   duration: number;
+  questionCount: number;
+  questionNumber: number;
+  tableLimit: number;
+  cachedQuestionCount: number;
   question: PublicQuestion | null;
   questionStartedAt: number | null;
+  pausedRemainingMs: number | null;
   teams: Team[];
 };
 
@@ -121,7 +132,7 @@ function App() {
 
   useEffect(() => {
     if (!state?.questionStartedAt || state.phase !== "active") {
-      setRemaining(state?.duration ?? 0);
+      setRemaining(state?.phase === "paused" && state.pausedRemainingMs ? state.pausedRemainingMs / 1000 : state?.duration ?? 0);
       return;
     }
     const tick = window.setInterval(() => {
@@ -129,7 +140,7 @@ function App() {
       setRemaining(Math.max(0, state.duration - elapsed));
     }, 100);
     return () => window.clearInterval(tick);
-  }, [state?.duration, state?.phase, state?.questionStartedAt]);
+  }, [state?.duration, state?.phase, state?.pausedRemainingMs, state?.questionStartedAt]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -141,8 +152,12 @@ function App() {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [activeTeamId, deviceId, eventId, socket, state?.phase]);
 
-  const createEvent = async () => {
-    const response = await fetch("/api/events", { method: "POST" });
+  const createEvent = async (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit">> = {}) => {
+    const response = await fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    });
     const payload = await response.json();
     window.location.href = `/e/${payload.eventId}/admin`;
   };
@@ -209,9 +224,14 @@ function App() {
           setDuration={(duration) => socket?.emit("admin_set_config", { eventId, pin: adminPin, duration })}
           startRound={() => socket?.emit("admin_start_question", { eventId, pin: adminPin })}
           lockVoting={() => socket?.emit("admin_lock_voting", { eventId, pin: adminPin })}
+          pause={() => socket?.emit("admin_pause_question", { eventId, pin: adminPin })}
+          resume={() => socket?.emit("admin_resume_question", { eventId, pin: adminPin })}
+          closeQuestion={() => socket?.emit("admin_close_question", { eventId, pin: adminPin })}
           reveal={() => socket?.emit("admin_reveal", { eventId, pin: adminPin })}
           finish={() => socket?.emit("admin_finish", { eventId, pin: adminPin })}
           reset={() => socket?.emit("admin_reset", { eventId, pin: adminPin })}
+          updateEventSetup={(settings) => socket?.emit("admin_update_event_setup", { eventId, pin: adminPin, ...settings })}
+          createEvent={createEvent}
           adjustScore={(teamId, delta) => socket?.emit("admin_adjust_score", { eventId, pin: adminPin, teamId, delta })}
           setTeamStatus={(teamId, disqualified) =>
             socket?.emit("admin_set_team_status", { eventId, pin: adminPin, teamId, disqualified })
@@ -230,7 +250,7 @@ function Home({ createEvent }: { createEvent: () => void }) {
         <h1>Table Rush Trivia</h1>
         <p className="heroCopy">Create a live event, show the TV link on venue screens, and let every table join from any phone by scanning a public QR code.</p>
         <div className="actionRow">
-          <button className="primaryAction" onClick={createEvent}>
+          <button className="primaryAction" onClick={() => createEvent()}>
             <Plus size={18} /> Create live event
           </button>
           <a className="secondaryLink" href="/e/demo/admin">
@@ -438,12 +458,35 @@ function AdminView(props: {
   setDuration: (duration: number) => void;
   startRound: () => void;
   lockVoting: () => void;
+  pause: () => void;
+  resume: () => void;
+  closeQuestion: () => void;
   reveal: () => void;
   finish: () => void;
   reset: () => void;
+  updateEventSetup: (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit">>) => void;
+  createEvent: (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit">>) => void;
   adjustScore: (teamId: string, delta: number) => void;
   setTeamStatus: (teamId: string, disqualified: boolean) => void;
 }) {
+  const [setup, setSetup] = useState({
+    title: props.state.title,
+    difficulty: props.state.difficulty,
+    duration: props.state.duration,
+    questionCount: props.state.questionCount,
+    tableLimit: props.state.tableLimit,
+  });
+
+  useEffect(() => {
+    setSetup({
+      title: props.state.title,
+      difficulty: props.state.difficulty,
+      duration: props.state.duration,
+      questionCount: props.state.questionCount,
+      tableLimit: props.state.tableLimit,
+    });
+  }, [props.state.difficulty, props.state.duration, props.state.questionCount, props.state.tableLimit, props.state.title]);
+
   if (!props.adminAuthed) {
     return (
       <section className="workspace">
@@ -462,6 +505,12 @@ function AdminView(props: {
     );
   }
 
+  const setupLocked = !["vote", "ready"].includes(props.state.phase);
+  const answeredCount = props.state.question ? props.state.teams.filter((team) => team.answeredQuestionId === props.state.question?.id).length : 0;
+  const suspiciousTeams = props.state.teams
+    .filter((team) => team.violations > 0 || team.reconnects > 2 || team.disqualified)
+    .sort((a, b) => b.violations - a.violations || b.reconnects - a.reconnects);
+
   return (
     <section className="workspace adminGrid">
       <section className="panel">
@@ -469,26 +518,27 @@ function AdminView(props: {
           <Gauge size={20} />
           <h2>Host Controls</h2>
         </div>
-        <div className="controlRows">
-          <label>
-            <span>Difficulty</span>
-            <select value={props.state.difficulty} onChange={(event) => props.setDifficulty(event.target.value as Difficulty)}>
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </label>
-          <label>
-            <span>Timer</span>
-            <input type="number" min={8} max={30} value={props.state.duration} onChange={(event) => props.setDuration(Number(event.target.value))} />
-          </label>
+        <div className="hostStatus">
+          <span>{props.state.phase}</span>
+          <strong>Question {props.state.questionNumber}/{props.state.questionCount}</strong>
+          <strong>{answeredCount}/{props.state.teams.filter((team) => !team.disqualified).length} answered</strong>
+          <strong>{props.state.cachedQuestionCount} cached</strong>
         </div>
         <div className="actionRow">
           <button className="secondaryAction" onClick={props.lockVoting} disabled={props.state.phase !== "vote"}>
             <Vote size={18} /> Lock voting
           </button>
-          <button className="primaryAction" onClick={props.startRound} disabled={props.state.phase === "active"}>
+          <button className="primaryAction" onClick={props.startRound} disabled={["active", "paused", "finished"].includes(props.state.phase)}>
             <Play size={18} /> {props.state.phase === "reveal" ? "Next question" : "Start question"}
+          </button>
+          <button className="secondaryAction" onClick={props.pause} disabled={props.state.phase !== "active"}>
+            <Pause size={18} /> Pause
+          </button>
+          <button className="secondaryAction" onClick={props.resume} disabled={props.state.phase !== "paused"}>
+            <Play size={18} /> Resume
+          </button>
+          <button className="secondaryAction" onClick={props.closeQuestion} disabled={!["active", "paused"].includes(props.state.phase)}>
+            <Square size={18} /> Close
           </button>
           <button className="secondaryAction" onClick={props.reveal} disabled={props.state.phase !== "closed"}>
             <Eye size={18} /> Reveal
@@ -500,6 +550,48 @@ function AdminView(props: {
             <RefreshCcw size={18} /> Reset
           </button>
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="panelTitle">
+          <Settings size={20} />
+          <h2>Event Setup</h2>
+        </div>
+        <div className="setupGrid">
+          <label>
+            <span>Event name</span>
+            <input value={setup.title} onChange={(event) => setSetup({ ...setup, title: event.target.value })} disabled={setupLocked} />
+          </label>
+          <label>
+            <span>Difficulty</span>
+            <select value={setup.difficulty} onChange={(event) => setSetup({ ...setup, difficulty: event.target.value as Difficulty })} disabled={setupLocked}>
+              <option value="easy">Easy</option>
+              <option value="medium">Medium</option>
+              <option value="hard">Hard</option>
+            </select>
+          </label>
+          <label>
+            <span>Timer</span>
+            <input type="number" min={8} max={45} value={setup.duration} onChange={(event) => setSetup({ ...setup, duration: Number(event.target.value) })} disabled={setupLocked} />
+          </label>
+          <label>
+            <span>Questions</span>
+            <input type="number" min={3} max={30} value={setup.questionCount} onChange={(event) => setSetup({ ...setup, questionCount: Number(event.target.value) })} disabled={setupLocked} />
+          </label>
+          <label>
+            <span>Table limit</span>
+            <input type="number" min={2} max={100} value={setup.tableLimit} onChange={(event) => setSetup({ ...setup, tableLimit: Number(event.target.value) })} disabled={setupLocked} />
+          </label>
+        </div>
+        <div className="actionRow">
+          <button className="primaryAction" onClick={() => props.updateEventSetup(setup)} disabled={setupLocked}>
+            <Check size={18} /> Save setup
+          </button>
+          <button className="secondaryAction" onClick={() => props.createEvent(setup)}>
+            <Plus size={18} /> New event
+          </button>
+        </div>
+        {setupLocked && <p className="statusLine">Setup is locked after the first question starts.</p>}
       </section>
 
       <section className="panel">
@@ -519,14 +611,20 @@ function AdminView(props: {
       <section className="panel">
         <div className="panelTitle">
           <ShieldAlert size={20} />
-          <h2>Table Watch</h2>
+          <h2>Anti-Cheat Watch</h2>
+        </div>
+        <div className="watchSummary">
+          <span>{suspiciousTeams.length} watched</span>
+          <span>{props.state.teams.filter((team) => team.disqualified).length} DQ</span>
+          <span>{props.state.teams.length}/{props.state.tableLimit} tables</span>
         </div>
         <div className="teamList">
-          {props.state.teams.map((team) => (
+          {(suspiciousTeams.length ? suspiciousTeams : props.state.teams).map((team) => (
             <div className="teamRow" key={team.id}>
               <span>
                 {team.name}
                 {team.disqualified && <em>DQ</em>}
+                <small>{team.violations} focus flags | {team.reconnects} reconnects</small>
               </span>
               <div className="adminTeamActions">
                 <button onClick={() => props.adjustScore(team.id, -100)}>-100</button>
@@ -535,7 +633,7 @@ function AdminView(props: {
                   {team.disqualified ? "Restore" : "DQ"}
                 </button>
               </div>
-              <strong>{team.violations}</strong>
+              <strong>{team.score}</strong>
             </div>
           ))}
         </div>

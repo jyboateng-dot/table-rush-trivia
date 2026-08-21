@@ -4,14 +4,24 @@ CREATE TABLE IF NOT EXISTS trivia_events (
   phase text NOT NULL,
   difficulty text NOT NULL,
   duration integer NOT NULL,
+  question_count integer NOT NULL DEFAULT 10,
+  question_number integer NOT NULL DEFAULT 0,
+  table_limit integer NOT NULL DEFAULT 40,
   question jsonb,
+  question_queue jsonb NOT NULL DEFAULT '[]'::jsonb,
   question_started_at bigint,
+  paused_remaining_ms integer,
   asked_question_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS asked_question_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_count integer NOT NULL DEFAULT 10;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_number integer NOT NULL DEFAULT 0;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS table_limit integer NOT NULL DEFAULT 40;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_queue jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS paused_remaining_ms integer;
 
 CREATE TABLE IF NOT EXISTS trivia_teams (
   id text PRIMARY KEY,
@@ -21,12 +31,18 @@ CREATE TABLE IF NOT EXISTS trivia_teams (
   score integer NOT NULL DEFAULT 0,
   answered_question_id text,
   violations integer NOT NULL DEFAULT 0,
+  reconnects integer NOT NULL DEFAULT 0,
+  last_seen_at bigint,
+  last_violation_at bigint,
   disqualified boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS disqualified boolean NOT NULL DEFAULT false;
+ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS reconnects integer NOT NULL DEFAULT 0;
+ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_seen_at bigint;
+ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_violation_at bigint;
 
 CREATE INDEX IF NOT EXISTS trivia_teams_event_id_idx ON trivia_teams(event_id);
 

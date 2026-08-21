@@ -78,10 +78,31 @@ function makeEvent(id) {
     categories,
     difficulty: "medium",
     duration: 15,
+    questionCount: 10,
+    questionNumber: 0,
+    tableLimit: 40,
     question: null,
+    questionQueue: [],
     questionStartedAt: null,
+    pausedRemainingMs: null,
     askedQuestionIds: [],
     teams: [],
+  };
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(number)));
+}
+
+function normalizeEventSettings(settings = {}) {
+  return {
+    title: cleanName(settings.title || "Table Rush Trivia") || "Table Rush Trivia",
+    difficulty: ["easy", "medium", "hard"].includes(settings.difficulty) ? settings.difficulty : "medium",
+    duration: clampNumber(settings.duration, 8, 45, 15),
+    questionCount: clampNumber(settings.questionCount, 3, 30, 10),
+    tableLimit: clampNumber(settings.tableLimit, 2, 100, 40),
   };
 }
 
@@ -136,6 +157,7 @@ function sanitizeEvent(event, includeCorrect = false) {
     ...event,
     votes,
     selectedCategory: selectedFromVotes(votes),
+    cachedQuestionCount: event.questionQueue?.length ?? 0,
     question: event.question
       ? {
           ...event.question,
@@ -202,10 +224,45 @@ async function fetchQuestion(category, difficulty, askedQuestionIds = []) {
   return { ...shuffle(fallbackQuestions)[0], id: `fallback-${Date.now()}` };
 }
 
+async function fillQuestionQueue(event, minimum = 1) {
+  event.questionQueue = event.questionQueue ?? [];
+  const selectedCategory = selectedFromVotes(countVotes(event));
+  const target = Math.min(event.questionCount ?? 10, Math.max(minimum, event.questionQueue.length));
+  const reservedIds = [...(event.askedQuestionIds ?? []), ...event.questionQueue.map(questionFingerprint)];
+
+  while (event.questionQueue.length < target) {
+    const question = await fetchQuestion(selectedCategory, event.difficulty, reservedIds);
+    const fingerprint = questionFingerprint(question);
+    reservedIds.push(fingerprint);
+    event.questionQueue.push(question);
+  }
+}
+
+async function getNextQuestion(event) {
+  await fillQuestionQueue(event, 1);
+  const question = event.questionQueue.shift();
+  if (question) return question;
+  return fetchQuestion(selectedFromVotes(countVotes(event)), event.difficulty, event.askedQuestionIds ?? []);
+}
+
 function clearEventTimer(eventId) {
   const timer = timers.get(eventId);
   if (timer) clearTimeout(timer);
   timers.delete(eventId);
+}
+
+function startQuestionTimer(eventId, remainingMs) {
+  clearEventTimer(eventId);
+  timers.set(eventId, setTimeout(() => {
+    void (async () => {
+      const latest = await getEvent(eventId);
+      if (latest.phase !== "active") return;
+      latest.phase = "closed";
+      latest.pausedRemainingMs = null;
+      await persistEvent(latest);
+      broadcastEvent(eventId, latest);
+    })().catch((error) => console.error("question timer failed", error));
+  }, remainingMs));
 }
 
 function requireAdmin(socket, pin) {
@@ -276,13 +333,14 @@ app.get("/readyz", (_req, res) => {
   });
 });
 
-app.post("/api/events", (_req, res) => {
+app.post("/api/events", (req, res) => {
   void (async () => {
-  const eventId = Math.random().toString(36).slice(2, 8).toUpperCase();
-  const event = makeEvent(eventId);
-  events.set(eventId, event);
-  await persistEvent(event);
-  res.json({ eventId });
+    const eventId = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const event = makeEvent(eventId);
+    Object.assign(event, normalizeEventSettings(req.body));
+    events.set(eventId, event);
+    await persistEvent(event);
+    res.json({ eventId });
   })().catch((error) => {
     console.error("Create event failed", error);
     res.status(500).json({ error: "Failed to create event" });
@@ -290,7 +348,7 @@ app.post("/api/events", (_req, res) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("join_event", ({ eventId = "demo", role, pin }) => {
+  socket.on("join_event", ({ eventId = "demo", role, pin, teamId }) => {
     void (async () => {
     eventId = canUseEvent(socket, eventId);
     if (!eventId) return;
@@ -302,7 +360,18 @@ io.on("connection", (socket) => {
       socket.leave(eventId);
       socket.join(`${eventId}:admins`);
     }
-    socket.emit("state", { state: sanitizeEvent(await getEvent(eventId), socket.data.adminAuthed), adminAuthed: socket.data.adminAuthed });
+    const event = await getEvent(eventId);
+    if (role === "player" && teamId) {
+      const team = event.teams.find((item) => item.id === teamId);
+      if (team) {
+        team.reconnects = (team.reconnects ?? 0) + 1;
+        team.lastSeenAt = Date.now();
+        await persistEvent(event);
+        await logEvent(eventId, team.id, "player_reconnected", { reconnects: team.reconnects });
+        broadcastEvent(eventId, event);
+      }
+    }
+    socket.emit("state", { state: sanitizeEvent(event, socket.data.adminAuthed), adminAuthed: socket.data.adminAuthed });
     })().catch((error) => console.error("join_event failed", error));
   });
 
@@ -315,11 +384,14 @@ io.on("connection", (socket) => {
     if (cleanTeamName.length < 2) return emitError(socket, "invalid_name", "Enter a table name with at least two characters.");
     const event = await getEvent(eventId);
     if (event.phase !== "vote") return emitError(socket, "join_closed", "The host has already started the game.");
+    if (event.teams.length >= (event.tableLimit ?? 40)) return emitError(socket, "table_limit", "This event has reached the table limit.");
     const team = {
       id: `team-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: cleanTeamName,
       score: 0,
       violations: 0,
+      reconnects: 0,
+      lastSeenAt: Date.now(),
       disqualified: false,
     };
     event.teams.push(team);
@@ -398,7 +470,11 @@ io.on("connection", (socket) => {
     const event = await getEvent(eventId);
     const team = event.teams.find((item) => item.id === teamId);
     if (team?.disqualified) return;
-    if (team) team.violations += 1;
+    if (team) {
+      team.violations += 1;
+      team.lastViolationAt = Date.now();
+      team.lastSeenAt = Date.now();
+    }
     await persistEvent(event);
     if (team) await logEvent(eventId, team.id, "focus_loss", { phase: event.phase });
     broadcastEvent(eventId, event);
@@ -413,11 +489,28 @@ io.on("connection", (socket) => {
     socket.join(`${eventId}:admins`);
     const event = await getEvent(eventId);
     if (["easy", "medium", "hard"].includes(difficulty)) event.difficulty = difficulty;
-    if (Number.isFinite(duration)) event.duration = Math.max(8, Math.min(30, Number(duration)));
+    if (Number.isFinite(duration)) event.duration = clampNumber(duration, 8, 45, event.duration);
     await persistEvent(event);
     await logEvent(eventId, "admin", "config_updated", { difficulty: event.difficulty, duration: event.duration });
     broadcastEvent(eventId, event);
     })().catch((error) => console.error("admin_set_config failed", error));
+  });
+
+  socket.on("admin_update_event_setup", ({ eventId = "demo", pin, title, difficulty, duration, questionCount, tableLimit }) => {
+    void (async () => {
+    eventId = canUseEvent(socket, eventId);
+    if (!eventId) return;
+    if (!requireAdmin(socket, pin)) return;
+    socket.join(`${eventId}:admins`);
+    const event = await getEvent(eventId);
+    if (!["vote", "ready"].includes(event.phase)) return emitError(socket, "setup_locked", "Event setup can only change before questions start.");
+    const settings = normalizeEventSettings({ title, difficulty, duration, questionCount, tableLimit });
+    Object.assign(event, settings);
+    event.questionQueue = [];
+    await persistEvent(event);
+    await logEvent(eventId, "admin", "event_setup_updated", settings);
+    broadcastEvent(eventId, event);
+    })().catch((error) => console.error("admin_update_event_setup failed", error));
   });
 
   socket.on("admin_start_question", async ({ eventId = "demo", pin }) => {
@@ -428,19 +521,24 @@ io.on("connection", (socket) => {
     const event = await getEvent(eventId);
     clearEventTimer(eventId);
     if (event.phase === "finished") return;
-    event.question = await fetchQuestion(selectedFromVotes(countVotes(event)), event.difficulty, event.askedQuestionIds ?? []);
-    event.askedQuestionIds = [...(event.askedQuestionIds ?? []), questionFingerprint(event.question)];
-    event.questionStartedAt = Date.now();
-    event.phase = "active";
-    event.teams = event.teams.map((team) => ({ ...team, answeredQuestionId: undefined }));
-    timers.set(eventId, setTimeout(() => {
-      void (async () => {
-      event.phase = "closed";
+    if ((event.questionNumber ?? 0) >= (event.questionCount ?? 10)) {
+      event.phase = "finished";
       await persistEvent(event);
       broadcastEvent(eventId, event);
-      })().catch((error) => console.error("question timer failed", error));
-    }, event.duration * 1000));
+      return;
+    }
+    event.question = await getNextQuestion(event);
+    event.askedQuestionIds = [...(event.askedQuestionIds ?? []), questionFingerprint(event.question)];
+    event.questionStartedAt = Date.now();
+    event.pausedRemainingMs = null;
+    event.questionNumber = (event.questionNumber ?? 0) + 1;
+    event.phase = "active";
+    event.teams = event.teams.map((team) => ({ ...team, answeredQuestionId: undefined }));
+    startQuestionTimer(eventId, event.duration * 1000);
     await persistEvent(event);
+    void fillQuestionQueue(event, Math.min(3, event.questionCount ?? 10))
+      .then(() => persistEvent(event))
+      .catch((error) => console.error("question queue refill failed", error));
     await logEvent(eventId, "admin", "question_started", { questionId: event.question.id, category: event.question.category });
     broadcastEvent(eventId, event);
   });
@@ -454,10 +552,65 @@ io.on("connection", (socket) => {
     const event = await getEvent(eventId);
     if (event.phase !== "vote") return;
     event.phase = "ready";
+    await fillQuestionQueue(event, Math.min(3, event.questionCount ?? 10));
     await persistEvent(event);
     await logEvent(eventId, "admin", "voting_locked", { selectedCategory: selectedFromVotes(countVotes(event)) });
     broadcastEvent(eventId, event);
     })().catch((error) => console.error("admin_lock_voting failed", error));
+  });
+
+  socket.on("admin_pause_question", ({ eventId = "demo", pin }) => {
+    void (async () => {
+    eventId = canUseEvent(socket, eventId);
+    if (!eventId) return;
+    if (!requireAdmin(socket, pin)) return;
+    socket.join(`${eventId}:admins`);
+    const event = await getEvent(eventId);
+    if (event.phase !== "active" || !event.questionStartedAt) return;
+    const elapsed = Date.now() - event.questionStartedAt;
+    event.pausedRemainingMs = Math.max(0, event.duration * 1000 - elapsed);
+    event.phase = "paused";
+    clearEventTimer(eventId);
+    await persistEvent(event);
+    await logEvent(eventId, "admin", "question_paused", { remainingMs: event.pausedRemainingMs });
+    broadcastEvent(eventId, event);
+    })().catch((error) => console.error("admin_pause_question failed", error));
+  });
+
+  socket.on("admin_resume_question", ({ eventId = "demo", pin }) => {
+    void (async () => {
+    eventId = canUseEvent(socket, eventId);
+    if (!eventId) return;
+    if (!requireAdmin(socket, pin)) return;
+    socket.join(`${eventId}:admins`);
+    const event = await getEvent(eventId);
+    if (event.phase !== "paused" || !event.question) return;
+    const remainingMs = Math.max(0, event.pausedRemainingMs ?? event.duration * 1000);
+    event.questionStartedAt = Date.now() - (event.duration * 1000 - remainingMs);
+    event.pausedRemainingMs = null;
+    event.phase = "active";
+    startQuestionTimer(eventId, remainingMs);
+    await persistEvent(event);
+    await logEvent(eventId, "admin", "question_resumed", { remainingMs });
+    broadcastEvent(eventId, event);
+    })().catch((error) => console.error("admin_resume_question failed", error));
+  });
+
+  socket.on("admin_close_question", ({ eventId = "demo", pin }) => {
+    void (async () => {
+    eventId = canUseEvent(socket, eventId);
+    if (!eventId) return;
+    if (!requireAdmin(socket, pin)) return;
+    socket.join(`${eventId}:admins`);
+    clearEventTimer(eventId);
+    const event = await getEvent(eventId);
+    if (!["active", "paused"].includes(event.phase)) return;
+    event.phase = "closed";
+    event.pausedRemainingMs = null;
+    await persistEvent(event);
+    await logEvent(eventId, "admin", "question_closed", { questionId: event.question?.id });
+    broadcastEvent(eventId, event);
+    })().catch((error) => console.error("admin_close_question failed", error));
   });
 
   socket.on("admin_finish", ({ eventId = "demo", pin }) => {
@@ -533,9 +686,21 @@ io.on("connection", (socket) => {
     const event = await getEvent(eventId);
     event.phase = "vote";
     event.question = null;
+    event.questionNumber = 0;
+    event.questionQueue = [];
     event.questionStartedAt = null;
+    event.pausedRemainingMs = null;
     event.askedQuestionIds = [];
-    event.teams = event.teams.map((team) => ({ ...team, vote: undefined, score: 0, answeredQuestionId: undefined, violations: 0, disqualified: false }));
+    event.teams = event.teams.map((team) => ({
+      ...team,
+      vote: undefined,
+      score: 0,
+      answeredQuestionId: undefined,
+      violations: 0,
+      reconnects: 0,
+      lastViolationAt: undefined,
+      disqualified: false,
+    }));
     await persistEvent(event);
     await logEvent(eventId, "admin", "event_reset");
     broadcastEvent(eventId, event);

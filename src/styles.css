@@ -132,7 +132,7 @@ h2 {
 }
 
 .adminGrid {
-  grid-template-columns: 1.1fr 1fr 0.9fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .tvLayout {
@@ -458,6 +458,55 @@ select {
   display: grid;
   grid-template-columns: 1fr 120px;
   gap: 12px;
+}
+
+.hostStatus,
+.watchSummary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.hostStatus span,
+.hostStatus strong,
+.watchSummary span {
+  min-height: 34px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.setupGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.setupGrid label:first-child {
+  grid-column: 1 / -1;
+}
+
+.setupGrid span,
+.teamRow small {
+  display: block;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.setupGrid span {
+  margin: 0 0 6px;
+}
+
+.teamRow small {
+  margin-top: 4px;
 }
 
 @media (max-width: 920px) {
