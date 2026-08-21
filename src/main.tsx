@@ -555,7 +555,7 @@ function AdminView(props: {
   const setupLocked = !["vote", "ready"].includes(props.state.phase);
   const answeredCount = props.state.question ? props.state.teams.filter((team) => team.answeredQuestionId === props.state.question?.id).length : 0;
   const winner = props.state.teams.find((team) => team.id === props.state.winnerTeamId) ?? [...props.state.teams].sort((a, b) => Number(a.disqualified) - Number(b.disqualified) || b.score - a.score)[0];
-  const secureKey = props.state.adminKey ?? props.adminPin;
+  const secureKey = props.adminPin || props.state.adminKey;
   const adminUrl = `${props.baseEventUrl}/admin${secureKey ? `?key=${encodeURIComponent(secureKey)}` : ""}`;
   const tvUrl = `${props.baseEventUrl}/tv${secureKey ? `?key=${encodeURIComponent(secureKey)}` : ""}`;
   const resultsUrl = `/api/events/${props.state.id}/results?key=${encodeURIComponent(props.adminPin)}`;
