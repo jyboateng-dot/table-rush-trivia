@@ -378,6 +378,75 @@ select {
   line-height: 0.96;
 }
 
+.tvCategoryGrid,
+.tvAnswerGrid {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.tvCategoryGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.tvCategoryCard {
+  min-height: 76px;
+  border-radius: 8px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-left: 5px solid var(--accent);
+}
+
+.tvCategoryCard span,
+.tvAnswer span {
+  font-weight: 900;
+}
+
+.tvCategoryCard strong {
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.tvAnswerGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tvAnswer {
+  min-height: 84px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+}
+
+.tvAnswer strong {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background: rgba(244, 201, 93, 0.16);
+  color: #f4c95d;
+}
+
+.tvAnswer.correct {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.42);
+}
+
+.tvAnswer.correct strong {
+  background: #22c55e;
+  color: #06140b;
+}
+
 .voteBars {
   display: grid;
   gap: 11px;
@@ -651,7 +720,9 @@ select {
   }
 
   .categoryGrid,
-  .answerGrid {
+  .answerGrid,
+  .tvCategoryGrid,
+  .tvAnswerGrid {
     grid-template-columns: 1fr;
   }
 

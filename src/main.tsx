@@ -450,6 +450,7 @@ function PlayerView(props: {
 function TvView(props: { state: EventState; remaining: number; leaderboard: Team[]; joinUrl: string }) {
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(props.joinUrl)}`;
   const winner = props.state.teams.find((team) => team.id === props.state.winnerTeamId) ?? props.leaderboard[0];
+  const showQuestion = props.state.question && ["active", "paused", "closed", "reveal"].includes(props.state.phase);
   return (
     <section className="workspace tvLayout">
       <section className="stage">
@@ -472,14 +473,34 @@ function TvView(props: { state: EventState; remaining: number; leaderboard: Team
               </div>
             </div>
             <VoteBars categories={props.state.categories} votes={props.state.votes} />
+            <div className="tvCategoryGrid">
+              {(Object.entries(props.state.categories) as [CategoryKey, CategoryMeta][]).map(([key, item]) => (
+                <div className="tvCategoryCard" key={key} style={{ "--accent": item.accent } as React.CSSProperties}>
+                  <span>{item.label}</span>
+                  <strong>{props.state.votes[key]} votes</strong>
+                </div>
+              ))}
+            </div>
           </>
-        ) : (
+        ) : showQuestion ? (
           <>
             <div className="questionHeader large">
               <span>{props.state.question ? props.state.categories[props.state.question.category].label : props.state.categories[props.state.selectedCategory].label}</span>
-              <strong>{Math.ceil(props.remaining)}s</strong>
+              <strong>{props.state.phase === "paused" ? "Paused" : props.state.phase === "closed" ? "Closed" : `${Math.ceil(props.remaining)}s`}</strong>
             </div>
-            <h2 className="stageQuestion">{props.state.question?.question ?? "Ready for the next question"}</h2>
+            <p className="eyebrow">Question {props.state.questionNumber} of {props.state.questionCount}</p>
+            <h2 className="stageQuestion">{props.state.question?.question}</h2>
+            <div className="tvAnswerGrid">
+              {props.state.question?.answers.map((answer, index) => {
+                const correct = props.state.phase === "reveal" && answer === props.state.question?.correct;
+                return (
+                  <div className={`tvAnswer ${correct ? "correct" : ""}`} key={answer}>
+                    <strong>{String.fromCharCode(65 + index)}</strong>
+                    <span>{answer}</span>
+                  </div>
+                );
+              })}
+            </div>
             {props.state.phase === "reveal" && props.state.question?.correct && (
               <>
                 <div className="reveal">
@@ -488,6 +509,12 @@ function TvView(props: { state: EventState; remaining: number; leaderboard: Team
                 <CorrectTables state={props.state} />
               </>
             )}
+          </>
+        ) : (
+          <>
+            <p className="eyebrow">Ready</p>
+            <h2 className="stageQuestion">Waiting for the host</h2>
+            <p className="statusLine">Category selected: {props.state.categories[props.state.selectedCategory].label}</p>
           </>
         )}
       </section>
