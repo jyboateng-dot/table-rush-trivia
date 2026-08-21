@@ -192,17 +192,16 @@ function App() {
           <p className="eyebrow">{connected ? "Live room connected" : "Reconnecting"}</p>
           <h1>{state.title}</h1>
         </div>
-        <nav className="viewSwitch" aria-label="View selector">
-          <a className={view === "player" ? "active" : ""} href={`${baseEventUrl}/join`}>
-            <Smartphone size={18} /> Player
-          </a>
-          <a className={view === "tv" ? "active" : ""} href={`${baseEventUrl}/tv`}>
-            <Monitor size={18} /> TV
-          </a>
-          <a className={view === "admin" ? "active" : ""} href={`${baseEventUrl}/admin`}>
-            <Gauge size={18} /> Admin
-          </a>
-        </nav>
+        {view !== "player" && (
+          <nav className="viewSwitch" aria-label="View selector">
+            <a className={view === "tv" ? "active" : ""} href={`${baseEventUrl}/tv${adminPin ? `?key=${encodeURIComponent(adminPin)}` : ""}`}>
+              <Monitor size={18} /> TV
+            </a>
+            <a className={view === "admin" ? "active" : ""} href={`${baseEventUrl}/admin${adminPin ? `?key=${encodeURIComponent(adminPin)}` : ""}`}>
+              <Gauge size={18} /> Admin
+            </a>
+          </nav>
+        )}
       </section>
       {appError && <div className="appError">{appError}</div>}
 
@@ -223,7 +222,21 @@ function App() {
         />
       )}
 
-      {view === "tv" && <TvView state={state} remaining={remaining} leaderboard={leaderboard} joinUrl={`${baseEventUrl}/join`} />}
+      {view === "tv" && (
+        adminAuthed ? (
+          <TvView state={state} remaining={remaining} leaderboard={leaderboard} joinUrl={`${baseEventUrl}/join`} />
+        ) : (
+          <HostUnlock
+            title="TV Screen Locked"
+            adminPin={adminPin}
+            setAdminPin={(pin) => {
+              localStorage.setItem(`adminPin:${eventId}`, pin);
+              setAdminPin(pin);
+            }}
+            authenticate={() => socket?.emit("join_event", { eventId, role: "tv", pin: adminPin, deviceId })}
+          />
+        )
+      )}
 
       {view === "admin" && (
         <AdminView
@@ -466,6 +479,29 @@ function TvView(props: { state: EventState; remaining: number; leaderboard: Team
   );
 }
 
+function HostUnlock(props: {
+  title: string;
+  adminPin: string;
+  setAdminPin: (pin: string) => void;
+  authenticate: () => void;
+}) {
+  return (
+    <section className="workspace">
+      <section className="panel authPanel">
+        <div className="panelTitle">
+          <ShieldAlert size={20} />
+          <h2>{props.title}</h2>
+        </div>
+        <input type="password" placeholder="Host PIN or secure event key" value={props.adminPin} onChange={(event) => props.setAdminPin(event.target.value)} />
+        <button className="primaryAction wideAction" onClick={props.authenticate}>
+          <Check size={18} /> Unlock
+        </button>
+        <p className="statusLine">Use the private host PIN or the secure link from the admin dashboard.</p>
+      </section>
+    </section>
+  );
+}
+
 function AdminView(props: {
   state: EventState;
   adminPin: string;
@@ -512,26 +548,16 @@ function AdminView(props: {
 
   if (!props.adminAuthed) {
     return (
-      <section className="workspace">
-        <section className="panel authPanel">
-          <div className="panelTitle">
-            <ShieldAlert size={20} />
-            <h2>Host PIN</h2>
-          </div>
-          <input type="password" placeholder="Default local PIN: 2468" value={props.adminPin} onChange={(event) => props.setAdminPin(event.target.value)} />
-          <button className="primaryAction wideAction" onClick={props.authenticate}>
-            <Check size={18} /> Unlock admin
-          </button>
-          <p className="statusLine">Set HOST_PIN on the hosting provider before running this at a venue.</p>
-        </section>
-      </section>
+      <HostUnlock title="Admin Locked" adminPin={props.adminPin} setAdminPin={props.setAdminPin} authenticate={props.authenticate} />
     );
   }
 
   const setupLocked = !["vote", "ready"].includes(props.state.phase);
   const answeredCount = props.state.question ? props.state.teams.filter((team) => team.answeredQuestionId === props.state.question?.id).length : 0;
   const winner = props.state.teams.find((team) => team.id === props.state.winnerTeamId) ?? [...props.state.teams].sort((a, b) => Number(a.disqualified) - Number(b.disqualified) || b.score - a.score)[0];
-  const adminUrl = `${props.baseEventUrl}/admin${props.state.adminKey ? `?key=${encodeURIComponent(props.state.adminKey)}` : ""}`;
+  const secureKey = props.state.adminKey ?? props.adminPin;
+  const adminUrl = `${props.baseEventUrl}/admin${secureKey ? `?key=${encodeURIComponent(secureKey)}` : ""}`;
+  const tvUrl = `${props.baseEventUrl}/tv${secureKey ? `?key=${encodeURIComponent(secureKey)}` : ""}`;
   const resultsUrl = `/api/events/${props.state.id}/results?key=${encodeURIComponent(props.adminPin)}`;
   const suspiciousTeams = props.state.teams
     .filter((team) => team.violations > 0 || team.reconnects > 2 || team.disqualified)
@@ -644,7 +670,7 @@ function AdminView(props: {
         </div>
         <div className="linkStack">
           <a href={`${props.baseEventUrl}/join`}>Player QR link</a>
-          <a href={`${props.baseEventUrl}/tv`}>TV screen link</a>
+          <a href={tvUrl}>Secure TV screen link</a>
           <a href={adminUrl}>Secure admin link</a>
         </div>
         <p className="selectedLine">Leading: {props.state.categories[props.state.selectedCategory].label}</p>

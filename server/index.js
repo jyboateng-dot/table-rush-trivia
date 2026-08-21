@@ -264,6 +264,7 @@ function sanitizeEvent(event, includeCorrect = false) {
 
 function broadcastEvent(eventId, event) {
   io.to(eventId).emit("state", { state: sanitizeEvent(event, false), adminAuthed: false });
+  io.to(`${eventId}:tv`).emit("state", { state: sanitizeEvent(event, false), adminAuthed: true });
   io.to(`${eventId}:admins`).emit("state", { state: sanitizeEvent(event, true), adminAuthed: true });
 }
 
@@ -510,16 +511,19 @@ io.on("connection", (socket) => {
     void (async () => {
     eventId = canUseEvent(socket, eventId);
     if (!eventId) return;
-    socket.join(eventId);
     socket.data.eventId = eventId;
     socket.data.role = role;
     const event = await getEvent(eventId);
-    socket.data.adminAuthed = role === "admin" && requireAdmin(socket, pin, event);
-    if (socket.data.adminAuthed) {
-      socket.leave(eventId);
+    const privilegedRole = role === "admin" || role === "tv";
+    socket.data.adminAuthed = privilegedRole && requireAdmin(socket, pin, event);
+    if (role === "player") {
+      socket.join(eventId);
+    } else if (socket.data.adminAuthed && role === "admin") {
       socket.join(`${eventId}:admins`);
-    } else if (role === "admin") {
-      emitError(socket, "invalid_admin_pin", "That host PIN or admin key was not accepted for this event.");
+    } else if (socket.data.adminAuthed && role === "tv") {
+      socket.join(`${eventId}:tv`);
+    } else {
+      emitError(socket, "invalid_admin_pin", "That host PIN or admin key was not accepted for this screen.");
     }
     if (role === "player" && teamId) {
       const team = event.teams.find((item) => item.id === teamId);
@@ -531,7 +535,7 @@ io.on("connection", (socket) => {
         broadcastEvent(eventId, event);
       }
     }
-    socket.emit("state", { state: sanitizeEvent(event, socket.data.adminAuthed), adminAuthed: socket.data.adminAuthed });
+    socket.emit("state", { state: sanitizeEvent(event, socket.data.adminAuthed && role === "admin"), adminAuthed: socket.data.adminAuthed });
     })().catch((error) => console.error("join_event failed", error));
   });
 
