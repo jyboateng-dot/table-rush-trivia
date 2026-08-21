@@ -516,6 +516,8 @@ io.on("connection", (socket) => {
     if (socket.data.adminAuthed) {
       socket.leave(eventId);
       socket.join(`${eventId}:admins`);
+    } else if (role === "admin") {
+      emitError(socket, "invalid_admin_pin", "That host PIN or admin key was not accepted for this event.");
     }
     if (role === "player" && teamId) {
       const team = event.teams.find((item) => item.id === teamId);
