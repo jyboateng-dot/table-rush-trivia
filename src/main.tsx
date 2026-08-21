@@ -36,6 +36,8 @@ type Team = {
   vote?: CategoryKey;
   score: number;
   answeredQuestionId?: string;
+  lastAnswer?: string;
+  lastAnswerCorrect?: boolean;
   violations: number;
   reconnects: number;
   lastSeenAt?: number;
@@ -112,6 +114,11 @@ function App() {
   const [remaining, setRemaining] = useState(0);
   const [appError, setAppError] = useState("");
   const deviceId = useMemo(getDeviceId, []);
+  const tableFromQr = useMemo(() => {
+    const value = new URLSearchParams(window.location.search).get("table");
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  }, []);
 
   useEffect(() => {
     if (!route) return;
@@ -212,7 +219,8 @@ function App() {
           activeTeam={activeTeam}
           activeTeamId={activeTeamId}
           remaining={remaining}
-          joinTeam={() => socket?.emit("player_join_team", { eventId, deviceId })}
+          tableFromQr={tableFromQr}
+          joinTeam={() => socket?.emit("player_join_team", { eventId, tableNumber: tableFromQr, deviceId })}
           setActiveTeamId={(teamId) => {
             localStorage.setItem(`team:${eventId}`, teamId);
             setActiveTeamId(teamId);
@@ -311,6 +319,7 @@ function PlayerView(props: {
   activeTeam?: Team;
   activeTeamId: string;
   remaining: number;
+  tableFromQr?: number;
   joinTeam: () => void;
   setActiveTeamId: (id: string) => void;
   updateTeamName: (name: string) => void;
@@ -328,9 +337,13 @@ function PlayerView(props: {
             <Smartphone size={19} />
             <h2>Join Your Table</h2>
           </div>
-          <p className="statusLine">You will be assigned the next table number automatically. The leaderboard name starts as the table name and can be edited after joining.</p>
+          <p className="statusLine">
+            {props.tableFromQr
+              ? `This QR is assigned to Table ${props.tableFromQr}. The leaderboard name starts as the table name and can be edited after joining.`
+              : "You will be assigned the next table number automatically. The leaderboard name starts as the table name and can be edited after joining."}
+          </p>
           <button className="primaryAction wideAction" onClick={props.joinTeam}>
-            <Plus size={18} /> Join next table
+            <Plus size={18} /> {props.tableFromQr ? `Join Table ${props.tableFromQr}` : "Join next table"}
           </button>
           {props.state.teams.length > 0 && (
             <>
@@ -420,6 +433,7 @@ function PlayerView(props: {
               ))}
             </div>
             {answered && <p className="statusLine">Answer locked for {props.activeTeam.name}.</p>}
+            {props.state.phase === "reveal" && <CorrectTables state={props.state} />}
           </>
         ) : (
           <div className="emptyState">
@@ -467,15 +481,39 @@ function TvView(props: { state: EventState; remaining: number; leaderboard: Team
             </div>
             <h2 className="stageQuestion">{props.state.question?.question ?? "Ready for the next question"}</h2>
             {props.state.phase === "reveal" && props.state.question?.correct && (
-              <div className="reveal">
-                <Check size={22} /> {props.state.question.correct}
-              </div>
+              <>
+                <div className="reveal">
+                  <Check size={22} /> {props.state.question.correct}
+                </div>
+                <CorrectTables state={props.state} />
+              </>
             )}
           </>
         )}
       </section>
       <Leaderboard teams={props.leaderboard} />
     </section>
+  );
+}
+
+function CorrectTables({ state }: { state: EventState }) {
+  const correctTeams = state.teams
+    .filter((team) => team.lastAnswerCorrect && !team.disqualified)
+    .sort((a, b) => (a.tableNumber ?? 0) - (b.tableNumber ?? 0));
+
+  return (
+    <div className="correctTables">
+      <p className="eyebrow">Tables that got it right</p>
+      {correctTeams.length ? (
+        <div>
+          {correctTeams.map((team) => (
+            <span key={team.id}>Table {team.tableNumber}: {team.name}</span>
+          ))}
+        </div>
+      ) : (
+        <p className="statusLine">No correct tables this round.</p>
+      )}
+    </div>
   );
 }
 
@@ -559,6 +597,7 @@ function AdminView(props: {
   const adminUrl = `${props.baseEventUrl}/admin${secureKey ? `?key=${encodeURIComponent(secureKey)}` : ""}`;
   const tvUrl = `${props.baseEventUrl}/tv${secureKey ? `?key=${encodeURIComponent(secureKey)}` : ""}`;
   const resultsUrl = `/api/events/${props.state.id}/results?key=${encodeURIComponent(props.adminPin)}`;
+  const tableNumbers = Array.from({ length: props.state.tableLimit }, (_, index) => index + 1);
   const suspiciousTeams = props.state.teams
     .filter((team) => team.violations > 0 || team.reconnects > 2 || team.disqualified)
     .sort((a, b) => b.violations - a.violations || b.reconnects - a.reconnects);
@@ -675,6 +714,24 @@ function AdminView(props: {
         </div>
         <p className="selectedLine">Leading: {props.state.categories[props.state.selectedCategory].label}</p>
         <VoteBars categories={props.state.categories} votes={props.state.votes} />
+      </section>
+
+      <section className="panel tableQrPanel">
+        <div className="panelTitle">
+          <Smartphone size={20} />
+          <h2>Table QR Codes</h2>
+        </div>
+        <div className="tableQrGrid">
+          {tableNumbers.map((tableNumber) => {
+            const tableUrl = `${props.baseEventUrl}/join?table=${tableNumber}`;
+            return (
+              <a className="tableQrCard" href={tableUrl} key={tableNumber} target="_blank" rel="noreferrer">
+                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(tableUrl)}`} alt={`Table ${tableNumber} QR code`} />
+                <strong>Table {tableNumber}</strong>
+              </a>
+            );
+          })}
+        </div>
       </section>
 
       <section className="panel">

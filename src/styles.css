@@ -584,6 +584,59 @@ select {
   color: #f4c95d;
 }
 
+.tableQrPanel {
+  grid-column: 1 / -1;
+}
+
+.tableQrGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 12px;
+  max-height: 480px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.tableQrCard {
+  border-radius: 8px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+}
+
+.tableQrCard img {
+  width: 112px;
+  height: 112px;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px;
+}
+
+.correctTables {
+  margin-top: 18px;
+}
+
+.correctTables > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.correctTables span {
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  background: rgba(34, 197, 94, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  color: #dcfce7;
+  font-weight: 900;
+}
+
 @media (max-width: 920px) {
   .topbar,
   .qrBlock {

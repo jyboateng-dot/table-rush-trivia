@@ -62,6 +62,8 @@ export async function initDb() {
       vote text,
       score integer NOT NULL DEFAULT 0,
       answered_question_id text,
+      last_answer text,
+      last_answer_correct boolean,
       violations integer NOT NULL DEFAULT 0,
       reconnects integer NOT NULL DEFAULT 0,
       last_seen_at bigint,
@@ -73,6 +75,8 @@ export async function initDb() {
 
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS disqualified boolean NOT NULL DEFAULT false;
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS table_number integer;
+    ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_answer text;
+    ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_answer_correct boolean;
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS reconnects integer NOT NULL DEFAULT 0;
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_seen_at bigint;
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_violation_at bigint;
@@ -121,7 +125,7 @@ export async function loadEvent(eventId, categories) {
 
   const eventRow = eventResult.rows[0];
   const teamResult = await pool.query(
-    `SELECT id, table_number, name, vote, score, answered_question_id, violations, reconnects, last_seen_at, last_violation_at, disqualified
+    `SELECT id, table_number, name, vote, score, answered_question_id, last_answer, last_answer_correct, violations, reconnects, last_seen_at, last_violation_at, disqualified
      FROM trivia_teams
      WHERE event_id = $1
      ORDER BY created_at ASC`,
@@ -155,6 +159,8 @@ export async function loadEvent(eventId, categories) {
       vote: row.vote ?? undefined,
       score: row.score,
       answeredQuestionId: row.answered_question_id ?? undefined,
+      lastAnswer: row.last_answer ?? undefined,
+      lastAnswerCorrect: row.last_answer_correct ?? undefined,
       violations: row.violations,
       reconnects: row.reconnects,
       lastSeenAt: row.last_seen_at ? Number(row.last_seen_at) : undefined,
@@ -221,16 +227,18 @@ export async function saveEvent(event) {
     for (const team of event.teams) {
       await client.query(
         `INSERT INTO trivia_teams (
-           id, event_id, table_number, name, vote, score, answered_question_id, violations,
-           reconnects, last_seen_at, last_violation_at, disqualified, updated_at
+           id, event_id, table_number, name, vote, score, answered_question_id,
+           last_answer, last_answer_correct, violations, reconnects, last_seen_at, last_violation_at, disqualified, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
          ON CONFLICT (id) DO UPDATE SET
            table_number = EXCLUDED.table_number,
            name = EXCLUDED.name,
            vote = EXCLUDED.vote,
            score = EXCLUDED.score,
            answered_question_id = EXCLUDED.answered_question_id,
+           last_answer = EXCLUDED.last_answer,
+           last_answer_correct = EXCLUDED.last_answer_correct,
            violations = EXCLUDED.violations,
            reconnects = EXCLUDED.reconnects,
            last_seen_at = EXCLUDED.last_seen_at,
@@ -245,6 +253,8 @@ export async function saveEvent(event) {
           team.vote ?? null,
           team.score,
           team.answeredQuestionId ?? null,
+          team.lastAnswer ?? null,
+          team.lastAnswerCorrect ?? null,
           team.violations,
           team.reconnects ?? 0,
           team.lastSeenAt ?? null,

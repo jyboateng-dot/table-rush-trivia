@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS trivia_teams (
   vote text,
   score integer NOT NULL DEFAULT 0,
   answered_question_id text,
+  last_answer text,
+  last_answer_correct boolean,
   violations integer NOT NULL DEFAULT 0,
   reconnects integer NOT NULL DEFAULT 0,
   last_seen_at bigint,
@@ -52,6 +54,8 @@ CREATE TABLE IF NOT EXISTS trivia_teams (
 
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS disqualified boolean NOT NULL DEFAULT false;
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS table_number integer;
+ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_answer text;
+ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_answer_correct boolean;
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS reconnects integer NOT NULL DEFAULT 0;
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_seen_at bigint;
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_violation_at bigint;

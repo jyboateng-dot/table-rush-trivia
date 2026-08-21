@@ -396,6 +396,12 @@ function normalizeEventId(value) {
   return eventIdPattern.test(eventId) ? eventId : null;
 }
 
+function normalizeTableNumber(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1 || number > 999) return null;
+  return number;
+}
+
 function cleanName(value) {
   return String(value || "")
     .replace(/\s+/g, " ")
@@ -539,15 +545,27 @@ io.on("connection", (socket) => {
     })().catch((error) => console.error("join_event failed", error));
   });
 
-  socket.on("player_join_team", ({ eventId = "demo" }) => {
+  socket.on("player_join_team", ({ eventId = "demo", tableNumber }) => {
     void (async () => {
     if (!allowAction(socket, "join_team", 3, 60_000)) return emitError(socket, "rate_limited", "Please wait before joining another table.");
     eventId = canUseEvent(socket, eventId);
     if (!eventId) return;
     const event = await getEvent(eventId);
     if (event.phase !== "vote") return emitError(socket, "join_closed", "The host has already started the game.");
+    const requestedTableNumber = normalizeTableNumber(tableNumber);
+    const existingTable = requestedTableNumber ? event.teams.find((team) => team.tableNumber === requestedTableNumber) : null;
+    if (existingTable) {
+      existingTable.lastSeenAt = Date.now();
+      existingTable.reconnects = (existingTable.reconnects ?? 0) + 1;
+      await persistEvent(event);
+      await logEvent(eventId, existingTable.id, "table_qr_reconnected", { tableNumber: existingTable.tableNumber });
+      socket.emit("team_joined", { teamId: existingTable.id });
+      broadcastEvent(eventId, event);
+      return;
+    }
     if (event.teams.length >= (event.tableLimit ?? 40)) return emitError(socket, "table_limit", "This event has reached the table limit.");
-    const nextTableNumber = Math.max(0, ...event.teams.map((team) => team.tableNumber ?? 0)) + 1;
+    const nextTableNumber = requestedTableNumber ?? Math.max(0, ...event.teams.map((team) => team.tableNumber ?? 0)) + 1;
+    if (nextTableNumber > (event.tableLimit ?? 40)) return emitError(socket, "table_limit", "That table number is outside this event's table limit.");
     const tableLabel = `Table ${nextTableNumber}`;
     const team = {
       id: `team-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -613,6 +631,8 @@ io.on("connection", (socket) => {
     const points = isCorrect ? Math.round(500 + speedFactor * 500) : 0;
     team.score += points;
     team.answeredQuestionId = event.question.id;
+    team.lastAnswer = answer;
+    team.lastAnswerCorrect = isCorrect;
     await saveSubmission({
       eventId,
       teamId: team.id,
@@ -698,7 +718,7 @@ io.on("connection", (socket) => {
     event.pausedRemainingMs = null;
     event.questionNumber = (event.questionNumber ?? 0) + 1;
     event.phase = "active";
-    event.teams = event.teams.map((team) => ({ ...team, answeredQuestionId: undefined }));
+    event.teams = event.teams.map((team) => ({ ...team, answeredQuestionId: undefined, lastAnswer: undefined, lastAnswerCorrect: undefined }));
     startQuestionTimer(eventId, event.duration * 1000);
     await persistEvent(event);
     void fillQuestionQueue(event, Math.min(3, event.questionCount ?? 10))
@@ -901,6 +921,8 @@ io.on("connection", (socket) => {
       vote: undefined,
       score: 0,
       answeredQuestionId: undefined,
+      lastAnswer: undefined,
+      lastAnswerCorrect: undefined,
       violations: 0,
       reconnects: 0,
       lastViolationAt: undefined,
