@@ -38,9 +38,11 @@ Use these routes on the host:
 ```text
 /healthz
 /readyz
+/ops/status
 ```
 
 `/readyz` checks the Postgres connection when `DATABASE_URL` is configured.
+`/ops/status` is intended for uptime monitors and pre-show checks. It reports whether the app is using Postgres, whether the Socket.IO adapter is production-ready, whether allowed origins are configured, and whether the default local host PIN is still active.
 
 ## Supabase setup
 
@@ -55,8 +57,15 @@ If the host blocks automatic table creation, run `server/schema.sql` in the Supa
 ## Venue launch checklist
 
 - Use a public HTTPS domain.
+- Use an always-on paid hosting plan for real venue nights.
 - Confirm the TV QR displays the public `/e/{eventId}/join` URL.
 - Open admin, TV, and at least 5 phones at the same time.
 - Test voting, lock voting, start question, answer submit, reveal, next question, finish.
 - Test one phone on mobile data and one on venue Wi-Fi.
 - Change `HOST_PIN` from the local default.
+
+See also:
+
+- [PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md)
+- [HOST_RUNBOOK.md](HOST_RUNBOOK.md)
+- [LIVE_REHEARSAL_CHECKLIST.md](LIVE_REHEARSAL_CHECKLIST.md)

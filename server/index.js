@@ -448,6 +448,24 @@ app.get("/readyz", (_req, res) => {
   });
 });
 
+app.get("/ops/status", (_req, res) => {
+  void (async () => {
+    const databaseOk = pool ? await pool.query("SELECT 1").then(() => true) : false;
+    res.json({
+      ok: hasDatabase ? databaseOk : true,
+      nodeEnv: process.env.NODE_ENV || "development",
+      persistence: hasDatabase ? "postgres" : "memory",
+      websocketAdapter: hasDatabase ? "postgres" : "in-process",
+      allowedOriginsConfigured: allowedOrigins.length > 0,
+      defaultHostPin: hostPin === "2468",
+      uptimeSeconds: Math.round(process.uptime()),
+      timestamp: new Date().toISOString(),
+    });
+  })().catch((error) => {
+    res.status(503).json({ ok: false, error: error.message });
+  });
+});
+
 app.post("/api/events", (req, res) => {
   void (async () => {
     const eventId = Math.random().toString(36).slice(2, 8).toUpperCase();

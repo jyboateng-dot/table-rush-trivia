@@ -37,6 +37,7 @@ ALLOWED_ORIGINS=https://your-domain.com
 ```text
 /healthz
 /readyz
+/ops/status
 ```
 
 ## Deploy
@@ -56,4 +57,4 @@ docker build -t table-rush-trivia .
 docker run -p 5173:5173 --env-file .env table-rush-trivia
 ```
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for Supabase setup and venue launch checks.
+See [DEPLOYMENT.md](DEPLOYMENT.md), [PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md), [HOST_RUNBOOK.md](HOST_RUNBOOK.md), and [LIVE_REHEARSAL_CHECKLIST.md](LIVE_REHEARSAL_CHECKLIST.md) for Supabase setup, production checks, and venue launch operations.
