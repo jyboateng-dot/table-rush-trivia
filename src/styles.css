@@ -309,6 +309,19 @@ select {
   line-height: 1.35;
 }
 
+.fixedTableLabel {
+  min-height: 42px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  margin: 12px 0 0;
+  padding: 0 12px;
+  background: rgba(244, 201, 93, 0.13);
+  color: #f8fafc;
+  border: 1px solid rgba(244, 201, 93, 0.26);
+  font-weight: 900;
+}
+
 .emptyState {
   min-height: 340px;
   display: grid;
@@ -524,6 +537,15 @@ select {
 
 .teamRow small {
   margin-top: 4px;
+}
+
+.teamRow b,
+.leaderRow b {
+  display: block;
+  margin-bottom: 2px;
+  color: #f4c95d;
+  font-size: 0.76rem;
+  line-height: 1.15;
 }
 
 .adminQr {

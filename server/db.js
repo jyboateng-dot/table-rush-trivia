@@ -57,6 +57,7 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS trivia_teams (
       id text PRIMARY KEY,
       event_id text NOT NULL REFERENCES trivia_events(id) ON DELETE CASCADE,
+      table_number integer,
       name text NOT NULL,
       vote text,
       score integer NOT NULL DEFAULT 0,
@@ -71,6 +72,7 @@ export async function initDb() {
     );
 
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS disqualified boolean NOT NULL DEFAULT false;
+    ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS table_number integer;
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS reconnects integer NOT NULL DEFAULT 0;
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_seen_at bigint;
     ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_violation_at bigint;
@@ -119,7 +121,7 @@ export async function loadEvent(eventId, categories) {
 
   const eventRow = eventResult.rows[0];
   const teamResult = await pool.query(
-    `SELECT id, name, vote, score, answered_question_id, violations, reconnects, last_seen_at, last_violation_at, disqualified
+    `SELECT id, table_number, name, vote, score, answered_question_id, violations, reconnects, last_seen_at, last_violation_at, disqualified
      FROM trivia_teams
      WHERE event_id = $1
      ORDER BY created_at ASC`,
@@ -146,8 +148,9 @@ export async function loadEvent(eventId, categories) {
     winnerTeamId: eventRow.winner_team_id ?? undefined,
     finalizedAt: eventRow.finalized_at ? Number(eventRow.finalized_at) : undefined,
     archivedAt: eventRow.archived_at ? Number(eventRow.archived_at) : undefined,
-    teams: teamResult.rows.map((row) => ({
+    teams: teamResult.rows.map((row, index) => ({
       id: row.id,
+      tableNumber: row.table_number ?? index + 1,
       name: row.name,
       vote: row.vote ?? undefined,
       score: row.score,
@@ -218,11 +221,12 @@ export async function saveEvent(event) {
     for (const team of event.teams) {
       await client.query(
         `INSERT INTO trivia_teams (
-           id, event_id, name, vote, score, answered_question_id, violations,
+           id, event_id, table_number, name, vote, score, answered_question_id, violations,
            reconnects, last_seen_at, last_violation_at, disqualified, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
          ON CONFLICT (id) DO UPDATE SET
+           table_number = EXCLUDED.table_number,
            name = EXCLUDED.name,
            vote = EXCLUDED.vote,
            score = EXCLUDED.score,
@@ -236,6 +240,7 @@ export async function saveEvent(event) {
         [
           team.id,
           event.id,
+          team.tableNumber ?? null,
           team.name,
           team.vote ?? null,
           team.score,

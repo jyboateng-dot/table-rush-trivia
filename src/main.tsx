@@ -31,6 +31,7 @@ type Phase = "vote" | "ready" | "active" | "paused" | "closed" | "reveal" | "fin
 type CategoryMeta = { label: string; accent: string };
 type Team = {
   id: string;
+  tableNumber: number;
   name: string;
   vote?: CategoryKey;
   score: number;
@@ -211,7 +212,7 @@ function App() {
           activeTeam={activeTeam}
           activeTeamId={activeTeamId}
           remaining={remaining}
-          joinTeam={(name) => socket?.emit("player_join_team", { eventId, name, deviceId })}
+          joinTeam={() => socket?.emit("player_join_team", { eventId, deviceId })}
           setActiveTeamId={(teamId) => {
             localStorage.setItem(`team:${eventId}`, teamId);
             setActiveTeamId(teamId);
@@ -310,13 +311,12 @@ function PlayerView(props: {
   activeTeam?: Team;
   activeTeamId: string;
   remaining: number;
-  joinTeam: (name: string) => void;
+  joinTeam: () => void;
   setActiveTeamId: (id: string) => void;
   updateTeamName: (name: string) => void;
   voteFor: (category: CategoryKey) => void;
   submitAnswer: (answer: string) => void;
 }) {
-  const [newName, setNewName] = useState("");
   const answered = props.state.question?.id === props.activeTeam?.answeredQuestionId;
   const disqualified = props.activeTeam?.disqualified === true;
 
@@ -328,10 +328,9 @@ function PlayerView(props: {
             <Smartphone size={19} />
             <h2>Join Your Table</h2>
           </div>
-          <label className="fieldLabel" htmlFor="new-team">Leaderboard name</label>
-          <input id="new-team" placeholder="e.g. Table 7 - Osu Boys" value={newName} onChange={(event) => setNewName(event.target.value)} />
-          <button className="primaryAction wideAction" disabled={!newName.trim()} onClick={() => props.joinTeam(newName.trim())}>
-            <Plus size={18} /> Join game
+          <p className="statusLine">You will be assigned the next table number automatically. The leaderboard name starts as the table name and can be edited after joining.</p>
+          <button className="primaryAction wideAction" onClick={props.joinTeam}>
+            <Plus size={18} /> Join next table
           </button>
           {props.state.teams.length > 0 && (
             <>
@@ -339,7 +338,7 @@ function PlayerView(props: {
               <div className="teamList">
                 {props.state.teams.map((team) => (
                   <button className="teamPick" key={team.id} onClick={() => props.setActiveTeamId(team.id)}>
-                    {team.name}
+                    Table {team.tableNumber} - {team.name}
                   </button>
                 ))}
               </div>
@@ -360,9 +359,10 @@ function PlayerView(props: {
         <label className="fieldLabel" htmlFor="team-select">Table</label>
         <select id="team-select" value={props.activeTeamId} onChange={(event) => props.setActiveTeamId(event.target.value)}>
           {props.state.teams.map((team) => (
-            <option key={team.id} value={team.id}>{team.name}</option>
+            <option key={team.id} value={team.id}>Table {team.tableNumber}</option>
           ))}
         </select>
+        <p className="fixedTableLabel">Table {props.activeTeam.tableNumber}</p>
         <label className="fieldLabel" htmlFor="team-name">Leaderboard name</label>
         <input id="team-name" value={props.activeTeam.name} onChange={(event) => props.updateTeamName(event.target.value)} />
         <button className="secondaryAction" onClick={() => props.setActiveTeamId("")}>
@@ -727,6 +727,7 @@ function AdminView(props: {
           {(suspiciousTeams.length ? suspiciousTeams : props.state.teams).map((team) => (
             <div className="teamRow" key={team.id}>
               <span>
+                <b>Table {team.tableNumber}</b>
                 {team.name}
                 {team.disqualified && <em>DQ</em>}
                 <small>{team.violations} focus flags | {team.reconnects} reconnects</small>
@@ -774,7 +775,7 @@ function Leaderboard({ teams }: { teams: Team[] }) {
       {teams.map((team, index) => (
         <div className={`leaderRow ${team.disqualified ? "disqualified" : ""}`} key={team.id}>
           <span className="rank">{index === 0 ? <Crown size={17} /> : index + 1}</span>
-          <span>{team.name}{team.disqualified ? " (DQ)" : ""}</span>
+          <span><b>Table {team.tableNumber}</b>{team.name}{team.disqualified ? " (DQ)" : ""}</span>
           <strong>{team.score}</strong>
         </div>
       ))}

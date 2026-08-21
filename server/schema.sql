@@ -36,6 +36,7 @@ ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS archived_at bigint;
 CREATE TABLE IF NOT EXISTS trivia_teams (
   id text PRIMARY KEY,
   event_id text NOT NULL REFERENCES trivia_events(id) ON DELETE CASCADE,
+  table_number integer,
   name text NOT NULL,
   vote text,
   score integer NOT NULL DEFAULT 0,
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS trivia_teams (
 );
 
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS disqualified boolean NOT NULL DEFAULT false;
+ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS table_number integer;
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS reconnects integer NOT NULL DEFAULT 0;
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_seen_at bigint;
 ALTER TABLE trivia_teams ADD COLUMN IF NOT EXISTS last_violation_at bigint;

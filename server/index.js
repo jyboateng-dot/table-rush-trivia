@@ -539,19 +539,20 @@ io.on("connection", (socket) => {
     })().catch((error) => console.error("join_event failed", error));
   });
 
-  socket.on("player_join_team", ({ eventId = "demo", name }) => {
+  socket.on("player_join_team", ({ eventId = "demo" }) => {
     void (async () => {
     if (!allowAction(socket, "join_team", 3, 60_000)) return emitError(socket, "rate_limited", "Please wait before joining another table.");
     eventId = canUseEvent(socket, eventId);
     if (!eventId) return;
-    const cleanTeamName = cleanName(name);
-    if (cleanTeamName.length < 2) return emitError(socket, "invalid_name", "Enter a table name with at least two characters.");
     const event = await getEvent(eventId);
     if (event.phase !== "vote") return emitError(socket, "join_closed", "The host has already started the game.");
     if (event.teams.length >= (event.tableLimit ?? 40)) return emitError(socket, "table_limit", "This event has reached the table limit.");
+    const nextTableNumber = Math.max(0, ...event.teams.map((team) => team.tableNumber ?? 0)) + 1;
+    const tableLabel = `Table ${nextTableNumber}`;
     const team = {
       id: `team-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name: cleanTeamName,
+      tableNumber: nextTableNumber,
+      name: tableLabel,
       score: 0,
       violations: 0,
       reconnects: 0,
@@ -560,7 +561,7 @@ io.on("connection", (socket) => {
     };
     event.teams.push(team);
     await persistEvent(event);
-    await logEvent(eventId, team.id, "team_joined", { name: team.name });
+    await logEvent(eventId, team.id, "team_joined", { tableNumber: team.tableNumber, name: team.name });
     socket.emit("team_joined", { teamId: team.id });
     broadcastEvent(eventId, event);
     })().catch((error) => console.error("player_join_team failed", error));
