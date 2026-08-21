@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS trivia_events (
   id text PRIMARY KEY,
   title text NOT NULL,
+  admin_key text,
   phase text NOT NULL,
   difficulty text NOT NULL,
   duration integer NOT NULL,
@@ -12,16 +13,25 @@ CREATE TABLE IF NOT EXISTS trivia_events (
   question_started_at bigint,
   paused_remaining_ms integer,
   asked_question_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  prize_label text NOT NULL DEFAULT 'Venue prize',
+  winner_team_id text,
+  finalized_at bigint,
+  archived_at bigint,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS asked_question_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS admin_key text;
 ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_count integer NOT NULL DEFAULT 10;
 ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_number integer NOT NULL DEFAULT 0;
 ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS table_limit integer NOT NULL DEFAULT 40;
 ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_queue jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS paused_remaining_ms integer;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS prize_label text NOT NULL DEFAULT 'Venue prize';
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS winner_team_id text;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS finalized_at bigint;
+ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS archived_at bigint;
 
 CREATE TABLE IF NOT EXISTS trivia_teams (
   id text PRIMARY KEY,

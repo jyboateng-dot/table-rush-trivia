@@ -22,6 +22,7 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS trivia_events (
       id text PRIMARY KEY,
       title text NOT NULL,
+      admin_key text,
       phase text NOT NULL,
       difficulty text NOT NULL,
       duration integer NOT NULL,
@@ -33,16 +34,25 @@ export async function initDb() {
       question_started_at bigint,
       paused_remaining_ms integer,
       asked_question_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+      prize_label text NOT NULL DEFAULT 'Venue prize',
+      winner_team_id text,
+      finalized_at bigint,
+      archived_at bigint,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS admin_key text;
     ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS asked_question_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_count integer NOT NULL DEFAULT 10;
     ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_number integer NOT NULL DEFAULT 0;
     ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS table_limit integer NOT NULL DEFAULT 40;
     ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS question_queue jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS paused_remaining_ms integer;
+    ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS prize_label text NOT NULL DEFAULT 'Venue prize';
+    ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS winner_team_id text;
+    ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS finalized_at bigint;
+    ALTER TABLE trivia_events ADD COLUMN IF NOT EXISTS archived_at bigint;
 
     CREATE TABLE IF NOT EXISTS trivia_teams (
       id text PRIMARY KEY,
@@ -119,6 +129,7 @@ export async function loadEvent(eventId, categories) {
   return {
     id: eventRow.id,
     title: eventRow.title,
+    adminKey: eventRow.admin_key ?? undefined,
     phase: eventRow.phase,
     categories,
     difficulty: eventRow.difficulty,
@@ -131,6 +142,10 @@ export async function loadEvent(eventId, categories) {
     questionStartedAt: eventRow.question_started_at ? Number(eventRow.question_started_at) : null,
     pausedRemainingMs: eventRow.paused_remaining_ms ?? null,
     askedQuestionIds: Array.isArray(eventRow.asked_question_ids) ? eventRow.asked_question_ids : [],
+    prizeLabel: eventRow.prize_label,
+    winnerTeamId: eventRow.winner_team_id ?? undefined,
+    finalizedAt: eventRow.finalized_at ? Number(eventRow.finalized_at) : undefined,
+    archivedAt: eventRow.archived_at ? Number(eventRow.archived_at) : undefined,
     teams: teamResult.rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -154,12 +169,14 @@ export async function saveEvent(event) {
     await client.query("BEGIN");
     await client.query(
       `INSERT INTO trivia_events (
-         id, title, phase, difficulty, duration, question_count, question_number, table_limit,
-         question, question_queue, question_started_at, paused_remaining_ms, asked_question_ids, updated_at
+         id, title, admin_key, phase, difficulty, duration, question_count, question_number, table_limit,
+         question, question_queue, question_started_at, paused_remaining_ms, asked_question_ids,
+         prize_label, winner_team_id, finalized_at, archived_at, updated_at
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
        ON CONFLICT (id) DO UPDATE SET
          title = EXCLUDED.title,
+         admin_key = COALESCE(trivia_events.admin_key, EXCLUDED.admin_key),
          phase = EXCLUDED.phase,
          difficulty = EXCLUDED.difficulty,
          duration = EXCLUDED.duration,
@@ -171,10 +188,15 @@ export async function saveEvent(event) {
          question_started_at = EXCLUDED.question_started_at,
          paused_remaining_ms = EXCLUDED.paused_remaining_ms,
          asked_question_ids = EXCLUDED.asked_question_ids,
+         prize_label = EXCLUDED.prize_label,
+         winner_team_id = EXCLUDED.winner_team_id,
+         finalized_at = EXCLUDED.finalized_at,
+         archived_at = EXCLUDED.archived_at,
          updated_at = now()`,
       [
         event.id,
         event.title,
+        event.adminKey ?? null,
         event.phase,
         event.difficulty,
         event.duration,
@@ -186,6 +208,10 @@ export async function saveEvent(event) {
         event.questionStartedAt,
         event.pausedRemainingMs ?? null,
         JSON.stringify(event.askedQuestionIds ?? []),
+        event.prizeLabel ?? "Venue prize",
+        event.winnerTeamId ?? null,
+        event.finalizedAt ?? null,
+        event.archivedAt ?? null,
       ]
     );
 

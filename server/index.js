@@ -1,5 +1,6 @@
 import express from "express";
 import { createServer } from "node:http";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Server } from "socket.io";
@@ -33,8 +34,12 @@ const ghanaBank = [
   ["easy", "On what date is Ghana's Independence Day observed?", ["6 March", "1 July", "25 May", "21 September"], "6 March", "Ghana High Commission, Ghana at a Glance", "https://london.mfa.gov.gh/ghana-at-a-glance"],
   ["medium", "What is Ghana's official currency?", ["Ghana cedi", "West African franc", "Naira", "Dalasi"], "Ghana cedi", "Ghana High Commission, Ghana at a Glance", "https://london.mfa.gov.gh/ghana-at-a-glance"],
   ["medium", "Which country borders Ghana to the east?", ["Togo", "Benin", "Burkina Faso", "Cote d'Ivoire"], "Togo", "Encyclopaedia Britannica, Ghana", "https://www.britannica.com/place/Ghana"],
+  ["medium", "Which city is historically associated with Ghana's Asante kingdom?", ["Kumasi", "Ho", "Bolgatanga", "Sekondi"], "Kumasi", "Encyclopaedia Britannica, Kumasi", "https://www.britannica.com/place/Kumasi"],
+  ["medium", "Which Ghanaian region is Cape Coast located in?", ["Central Region", "Ashanti Region", "Northern Region", "Upper East Region"], "Central Region", "Ghana High Commission, Ghana at a Glance", "https://london.mfa.gov.gh/ghana-at-a-glance"],
   ["hard", "Which major Ghanaian lake was formed after construction of the Akosombo Dam?", ["Lake Volta", "Lake Bosumtwi", "Lake Tana", "Lake Kivu"], "Lake Volta", "Encyclopaedia Britannica, Ghana", "https://www.britannica.com/place/Ghana"],
   ["hard", "Which Ghanaian leader became the country's first prime minister and president?", ["Kwame Nkrumah", "J. B. Danquah", "Kofi Annan", "Jerry Rawlings"], "Kwame Nkrumah", "Encyclopaedia Britannica, Kwame Nkrumah", "https://www.britannica.com/biography/Kwame-Nkrumah"],
+  ["hard", "Which river is associated with the Akosombo Dam hydroelectric project?", ["Volta River", "Pra River", "Ankobra River", "Tano River"], "Volta River", "Encyclopaedia Britannica, Ghana", "https://www.britannica.com/place/Ghana"],
+  ["hard", "Which Ghanaian diplomat served as Secretary-General of the United Nations?", ["Kofi Annan", "Ato Ahwoi", "Komla Dumor", "Abedi Pele"], "Kofi Annan", "United Nations, Kofi Annan", "https://www.un.org/sg/en/formersg/kofi-annan"],
 ].map(([difficulty, question, answers, correct, source, sourceUrl], index) => ({
   id: `ghana-${index + 1}`,
   category: "ghana",
@@ -59,6 +64,70 @@ const fallbackQuestions = [
   },
 ];
 
+const fallbackQuestionBank = [
+  ...fallbackQuestions,
+  {
+    id: "fallback-geography-1",
+    category: "geography",
+    difficulty: "easy",
+    question: "Which ocean lies along Ghana's southern coast?",
+    answers: ["Atlantic Ocean", "Indian Ocean", "Pacific Ocean", "Arctic Ocean"],
+    correct: "Atlantic Ocean",
+    source: "Built-in fallback question",
+    sourceUrl: "https://www.britannica.com/place/Ghana",
+  },
+  {
+    id: "fallback-movies-1",
+    category: "movies",
+    difficulty: "easy",
+    question: "Which movie features the character Jack Sparrow?",
+    answers: ["Pirates of the Caribbean", "The Matrix", "Black Panther", "Titanic"],
+    correct: "Pirates of the Caribbean",
+    source: "Built-in fallback question",
+    sourceUrl: "https://opentdb.com/",
+  },
+  {
+    id: "fallback-music-1",
+    category: "music",
+    difficulty: "easy",
+    question: "How many strings does a standard guitar usually have?",
+    answers: ["6", "4", "8", "12"],
+    correct: "6",
+    source: "Built-in fallback question",
+    sourceUrl: "https://opentdb.com/",
+  },
+  {
+    id: "fallback-sports-1",
+    category: "sports",
+    difficulty: "easy",
+    question: "How many players are on the pitch for one football team during regular play?",
+    answers: ["11", "9", "10", "12"],
+    correct: "11",
+    source: "Built-in fallback question",
+    sourceUrl: "https://opentdb.com/",
+  },
+  {
+    id: "fallback-science-1",
+    category: "science",
+    difficulty: "easy",
+    question: "What gas do humans need to breathe to survive?",
+    answers: ["Oxygen", "Helium", "Nitrogen", "Carbon dioxide"],
+    correct: "Oxygen",
+    source: "Built-in fallback question",
+    sourceUrl: "https://opentdb.com/",
+  },
+  {
+    id: "fallback-history-1",
+    category: "history",
+    difficulty: "easy",
+    question: "The pyramids of Giza are in which country?",
+    answers: ["Egypt", "Morocco", "Greece", "Mexico"],
+    correct: "Egypt",
+    source: "Built-in fallback question",
+    sourceUrl: "https://opentdb.com/",
+  },
+];
+
 const events = new Map();
 const timers = new Map();
 const rateBuckets = new Map();
@@ -74,6 +143,7 @@ function makeEvent(id) {
   return {
     id,
     title: "Table Rush Trivia",
+    adminKey: createAdminKey(),
     phase: "vote",
     categories,
     difficulty: "medium",
@@ -86,8 +156,16 @@ function makeEvent(id) {
     questionStartedAt: null,
     pausedRemainingMs: null,
     askedQuestionIds: [],
+    prizeLabel: "Venue prize",
+    winnerTeamId: undefined,
+    finalizedAt: undefined,
+    archivedAt: undefined,
     teams: [],
   };
+}
+
+function createAdminKey() {
+  return randomBytes(9).toString("base64url").toUpperCase();
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -103,6 +181,7 @@ function normalizeEventSettings(settings = {}) {
     duration: clampNumber(settings.duration, 8, 45, 15),
     questionCount: clampNumber(settings.questionCount, 3, 30, 10),
     tableLimit: clampNumber(settings.tableLimit, 2, 100, 40),
+    prizeLabel: cleanName(settings.prizeLabel || "Venue prize") || "Venue prize",
   };
 }
 
@@ -110,6 +189,10 @@ async function getEvent(id) {
   const persisted = hasDatabase ? await loadEvent(id, categories) : null;
   if (!persisted && events.has(id)) return events.get(id);
   const event = persisted ?? makeEvent(id);
+  if (!event.adminKey) {
+    event.adminKey = createAdminKey();
+    await persistEvent(event);
+  }
   events.set(id, event);
   if (!persisted) await persistEvent(event);
   await recoverActiveTimer(id, event);
@@ -153,11 +236,22 @@ function selectedFromVotes(votes) {
 
 function sanitizeEvent(event, includeCorrect = false) {
   const votes = countVotes(event);
+  const activeSockets = io.sockets.adapter.rooms.get(event.id)?.size ?? 0;
+  const adminSockets = io.sockets.adapter.rooms.get(`${event.id}:admins`)?.size ?? 0;
   return {
     ...event,
+    adminKey: includeCorrect ? event.adminKey : undefined,
     votes,
     selectedCategory: selectedFromVotes(votes),
     cachedQuestionCount: event.questionQueue?.length ?? 0,
+    venueStatus: {
+      persistence: hasDatabase ? "postgres" : "memory",
+      websocket: "live",
+      connectedDevices: activeSockets + adminSockets,
+      adminDevices: adminSockets,
+      uptime: Math.round(process.uptime()),
+      questionCacheReady: (event.questionQueue?.length ?? 0) >= Math.min(3, event.questionCount ?? 10),
+    },
     question: event.question
       ? {
           ...event.question,
@@ -189,6 +283,25 @@ function questionFingerprint(question) {
   return `${question.source}:${question.question}`.toLowerCase();
 }
 
+function isUsableQuestion(question) {
+  return Boolean(
+    question?.question &&
+      question.question.length <= 180 &&
+      question.correct &&
+      Array.isArray(question.answers) &&
+      question.answers.length === 4 &&
+      new Set(question.answers).size === 4
+  );
+}
+
+function fallbackFor(category, difficulty, askedQuestionIds = []) {
+  const scoped = fallbackQuestionBank.filter((item) => item.category === category && item.difficulty === difficulty);
+  const categoryScoped = fallbackQuestionBank.filter((item) => item.category === category);
+  const candidates = scoped.length ? scoped : categoryScoped.length ? categoryScoped : fallbackQuestionBank;
+  const selected = shuffle(candidates).find((item) => !askedQuestionIds.includes(questionFingerprint(item))) ?? shuffle(candidates)[0];
+  return { ...selected, id: `${selected.id}-${Date.now()}` };
+}
+
 async function fetchQuestion(category, difficulty, askedQuestionIds = []) {
   if (category === "ghana") {
     const pool = ghanaBank.filter((item) => item.difficulty === difficulty);
@@ -200,34 +313,36 @@ async function fetchQuestion(category, difficulty, askedQuestionIds = []) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       const categoryId = categories[category].openTdb;
-      const response = await fetch(`https://opentdb.com/api.php?amount=1&category=${categoryId}&difficulty=${difficulty}&type=multiple`);
+      const response = await fetch(`https://opentdb.com/api.php?amount=10&category=${categoryId}&difficulty=${difficulty}&type=multiple`);
       const data = await response.json();
-      const item = data.results?.[0];
-      if (!item) throw new Error("No question returned");
-      const correct = decodeHtml(item.correct_answer);
-      const question = {
-        id: `${category}-${Date.now()}-${attempt}`,
-        category,
-        difficulty,
-        question: decodeHtml(item.question),
-        answers: shuffle([correct, ...item.incorrect_answers.map(decodeHtml)]),
-        correct,
-        source: "Open Trivia Database",
-        sourceUrl: "https://opentdb.com/",
-      };
-      if (!askedQuestionIds.includes(questionFingerprint(question)) || attempt === 4) return question;
+      const results = data.results ?? [];
+      for (const [index, item] of results.entries()) {
+        const correct = decodeHtml(item.correct_answer);
+        const question = {
+          id: `${category}-${Date.now()}-${attempt}-${index}`,
+          category,
+          difficulty,
+          question: decodeHtml(item.question),
+          answers: shuffle([correct, ...item.incorrect_answers.map(decodeHtml)]),
+          correct,
+          source: "Open Trivia Database",
+          sourceUrl: "https://opentdb.com/",
+        };
+        if (isUsableQuestion(question) && !askedQuestionIds.includes(questionFingerprint(question))) return question;
+      }
     } catch {
       break;
     }
   }
 
-  return { ...shuffle(fallbackQuestions)[0], id: `fallback-${Date.now()}` };
+  return fallbackFor(category, difficulty, askedQuestionIds);
 }
 
 async function fillQuestionQueue(event, minimum = 1) {
   event.questionQueue = event.questionQueue ?? [];
   const selectedCategory = selectedFromVotes(countVotes(event));
-  const target = Math.min(event.questionCount ?? 10, Math.max(minimum, event.questionQueue.length));
+  const remaining = Math.max(0, (event.questionCount ?? 10) - (event.questionNumber ?? 0));
+  const target = Math.min(remaining, Math.max(minimum, event.questionQueue.length));
   const reservedIds = [...(event.askedQuestionIds ?? []), ...event.questionQueue.map(questionFingerprint)];
 
   while (event.questionQueue.length < target) {
@@ -265,8 +380,8 @@ function startQuestionTimer(eventId, remainingMs) {
   }, remainingMs));
 }
 
-function requireAdmin(socket, pin) {
-  if (pin === hostPin || socket.data.adminAuthed) {
+function requireAdmin(socket, pin, event) {
+  if (socket.data.adminAuthed || pin === event?.adminKey || pin === hostPin) {
     socket.data.adminAuthed = true;
     return true;
   }
@@ -340,10 +455,33 @@ app.post("/api/events", (req, res) => {
     Object.assign(event, normalizeEventSettings(req.body));
     events.set(eventId, event);
     await persistEvent(event);
-    res.json({ eventId });
+    res.json({ eventId, adminKey: event.adminKey });
   })().catch((error) => {
     console.error("Create event failed", error);
     res.status(500).json({ error: "Failed to create event" });
+  });
+});
+
+app.get("/api/events/:eventId/results", (req, res) => {
+  void (async () => {
+    const eventId = normalizeEventId(req.params.eventId);
+    if (!eventId) return res.status(400).json({ error: "Invalid event id" });
+    const event = await getEvent(eventId);
+    if (![event.adminKey, hostPin].includes(String(req.query.key || ""))) return res.status(403).json({ error: "Forbidden" });
+    const teams = [...event.teams].sort((a, b) => Number(a.disqualified) - Number(b.disqualified) || b.score - a.score);
+    res.json({
+      eventId: event.id,
+      title: event.title,
+      prizeLabel: event.prizeLabel,
+      phase: event.phase,
+      winner: teams.find((team) => team.id === event.winnerTeamId) ?? teams[0] ?? null,
+      finalizedAt: event.finalizedAt,
+      archivedAt: event.archivedAt,
+      leaderboard: teams,
+    });
+  })().catch((error) => {
+    console.error("Results export failed", error);
+    res.status(500).json({ error: "Failed to export results" });
   });
 });
 
@@ -355,12 +493,12 @@ io.on("connection", (socket) => {
     socket.join(eventId);
     socket.data.eventId = eventId;
     socket.data.role = role;
-    socket.data.adminAuthed = role === "admin" && requireAdmin(socket, pin);
+    const event = await getEvent(eventId);
+    socket.data.adminAuthed = role === "admin" && requireAdmin(socket, pin, event);
     if (socket.data.adminAuthed) {
       socket.leave(eventId);
       socket.join(`${eventId}:admins`);
     }
-    const event = await getEvent(eventId);
     if (role === "player" && teamId) {
       const team = event.teams.find((item) => item.id === teamId);
       if (team) {
@@ -496,7 +634,7 @@ io.on("connection", (socket) => {
     })().catch((error) => console.error("admin_set_config failed", error));
   });
 
-  socket.on("admin_update_event_setup", ({ eventId = "demo", pin, title, difficulty, duration, questionCount, tableLimit }) => {
+  socket.on("admin_update_event_setup", ({ eventId = "demo", pin, title, difficulty, duration, questionCount, tableLimit, prizeLabel }) => {
     void (async () => {
     eventId = canUseEvent(socket, eventId);
     if (!eventId) return;
@@ -504,7 +642,7 @@ io.on("connection", (socket) => {
     socket.join(`${eventId}:admins`);
     const event = await getEvent(eventId);
     if (!["vote", "ready"].includes(event.phase)) return emitError(socket, "setup_locked", "Event setup can only change before questions start.");
-    const settings = normalizeEventSettings({ title, difficulty, duration, questionCount, tableLimit });
+    const settings = normalizeEventSettings({ title, difficulty, duration, questionCount, tableLimit, prizeLabel });
     Object.assign(event, settings);
     event.questionQueue = [];
     await persistEvent(event);
@@ -622,6 +760,8 @@ io.on("connection", (socket) => {
     clearEventTimer(eventId);
     const event = await getEvent(eventId);
     event.phase = "finished";
+    event.winnerTeamId = event.winnerTeamId ?? [...event.teams].sort((a, b) => Number(a.disqualified) - Number(b.disqualified) || b.score - a.score)[0]?.id;
+    event.finalizedAt = event.finalizedAt ?? Date.now();
     await persistEvent(event);
     await logEvent(eventId, "admin", "event_finished");
     broadcastEvent(eventId, event);
@@ -676,6 +816,41 @@ io.on("connection", (socket) => {
     })().catch((error) => console.error("admin_set_team_status failed", error));
   });
 
+  socket.on("admin_declare_winner", ({ eventId = "demo", pin, teamId }) => {
+    void (async () => {
+    eventId = canUseEvent(socket, eventId);
+    if (!eventId) return;
+    const event = await getEvent(eventId);
+    if (!requireAdmin(socket, pin, event)) return;
+    socket.join(`${eventId}:admins`);
+    const winner = event.teams.find((team) => team.id === teamId);
+    if (!winner) return emitError(socket, "winner_missing", "Choose a valid table before declaring the winner.");
+    clearEventTimer(eventId);
+    event.winnerTeamId = winner.id;
+    event.finalizedAt = Date.now();
+    event.phase = "finished";
+    await persistEvent(event);
+    await logEvent(eventId, "admin", "winner_declared", { teamId: winner.id, prizeLabel: event.prizeLabel });
+    broadcastEvent(eventId, event);
+    })().catch((error) => console.error("admin_declare_winner failed", error));
+  });
+
+  socket.on("admin_archive_event", ({ eventId = "demo", pin }) => {
+    void (async () => {
+    eventId = canUseEvent(socket, eventId);
+    if (!eventId) return;
+    const event = await getEvent(eventId);
+    if (!requireAdmin(socket, pin, event)) return;
+    socket.join(`${eventId}:admins`);
+    clearEventTimer(eventId);
+    event.archivedAt = Date.now();
+    event.phase = "finished";
+    await persistEvent(event);
+    await logEvent(eventId, "admin", "event_archived");
+    broadcastEvent(eventId, event);
+    })().catch((error) => console.error("admin_archive_event failed", error));
+  });
+
   socket.on("admin_reset", ({ eventId = "demo", pin }) => {
     void (async () => {
     eventId = canUseEvent(socket, eventId);
@@ -691,6 +866,9 @@ io.on("connection", (socket) => {
     event.questionStartedAt = null;
     event.pausedRemainingMs = null;
     event.askedQuestionIds = [];
+    event.winnerTeamId = undefined;
+    event.finalizedAt = undefined;
+    event.archivedAt = undefined;
     event.teams = event.teams.map((team) => ({
       ...team,
       vote: undefined,

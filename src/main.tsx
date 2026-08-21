@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   Crown,
+  Download,
   Eye,
   Gauge,
   Link as LinkIcon,
@@ -40,6 +41,14 @@ type Team = {
   lastViolationAt?: number;
   disqualified?: boolean;
 };
+type VenueStatus = {
+  persistence: string;
+  websocket: string;
+  connectedDevices: number;
+  adminDevices: number;
+  uptime: number;
+  questionCacheReady: boolean;
+};
 type PublicQuestion = {
   id: string;
   category: CategoryKey;
@@ -53,6 +62,7 @@ type PublicQuestion = {
 type EventState = {
   id: string;
   title: string;
+  adminKey?: string;
   phase: Phase;
   categories: Record<CategoryKey, CategoryMeta>;
   votes: Record<CategoryKey, number>;
@@ -63,6 +73,11 @@ type EventState = {
   questionNumber: number;
   tableLimit: number;
   cachedQuestionCount: number;
+  venueStatus: VenueStatus;
+  prizeLabel: string;
+  winnerTeamId?: string;
+  finalizedAt?: number;
+  archivedAt?: number;
   question: PublicQuestion | null;
   questionStartedAt: number | null;
   pausedRemainingMs: number | null;
@@ -90,7 +105,7 @@ function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [state, setState] = useState<EventState | null>(null);
   const [connected, setConnected] = useState(false);
-  const [adminPin, setAdminPin] = useState(() => localStorage.getItem(`adminPin:${eventId}`) ?? "");
+  const [adminPin, setAdminPin] = useState(() => new URLSearchParams(window.location.search).get("key") ?? localStorage.getItem(`adminPin:${eventId}`) ?? "");
   const [adminAuthed, setAdminAuthed] = useState(false);
   const [activeTeamId, setActiveTeamId] = useState(() => localStorage.getItem(`team:${eventId}`) ?? "");
   const [remaining, setRemaining] = useState(0);
@@ -152,14 +167,15 @@ function App() {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [activeTeamId, deviceId, eventId, socket, state?.phase]);
 
-  const createEvent = async (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit">> = {}) => {
+  const createEvent = async (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit" | "prizeLabel">> = {}) => {
     const response = await fetch("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     });
     const payload = await response.json();
-    window.location.href = `/e/${payload.eventId}/admin`;
+    if (payload.adminKey) localStorage.setItem(`adminPin:${payload.eventId}`, payload.adminKey);
+    window.location.href = `/e/${payload.eventId}/admin${payload.adminKey ? `?key=${encodeURIComponent(payload.adminKey)}` : ""}`;
   };
 
   if (!route) return <Home createEvent={createEvent} />;
@@ -232,6 +248,8 @@ function App() {
           reset={() => socket?.emit("admin_reset", { eventId, pin: adminPin })}
           updateEventSetup={(settings) => socket?.emit("admin_update_event_setup", { eventId, pin: adminPin, ...settings })}
           createEvent={createEvent}
+          declareWinner={(teamId) => socket?.emit("admin_declare_winner", { eventId, pin: adminPin, teamId })}
+          archiveEvent={() => socket?.emit("admin_archive_event", { eventId, pin: adminPin })}
           adjustScore={(teamId, delta) => socket?.emit("admin_adjust_score", { eventId, pin: adminPin, teamId, delta })}
           setTeamStatus={(teamId, disqualified) =>
             socket?.emit("admin_set_team_status", { eventId, pin: adminPin, teamId, disqualified })
@@ -404,15 +422,16 @@ function PlayerView(props: {
 
 function TvView(props: { state: EventState; remaining: number; leaderboard: Team[]; joinUrl: string }) {
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(props.joinUrl)}`;
+  const winner = props.state.teams.find((team) => team.id === props.state.winnerTeamId) ?? props.leaderboard[0];
   return (
     <section className="workspace tvLayout">
       <section className="stage">
         {props.state.phase === "finished" ? (
           <>
             <p className="eyebrow">Final winner</p>
-            <h2 className="stageQuestion">{props.leaderboard[0]?.name ?? "No winner yet"}</h2>
+            <h2 className="stageQuestion">{winner?.name ?? "No winner yet"}</h2>
             <div className="reveal">
-              <Trophy size={22} /> {props.leaderboard[0]?.score ?? 0} points
+              <Trophy size={22} /> {winner?.score ?? 0} points - {props.state.prizeLabel}
             </div>
           </>
         ) : props.state.phase === "vote" ? (
@@ -464,8 +483,10 @@ function AdminView(props: {
   reveal: () => void;
   finish: () => void;
   reset: () => void;
-  updateEventSetup: (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit">>) => void;
-  createEvent: (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit">>) => void;
+  updateEventSetup: (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit" | "prizeLabel">>) => void;
+  createEvent: (settings: Partial<Pick<EventState, "title" | "difficulty" | "duration" | "questionCount" | "tableLimit" | "prizeLabel">>) => void;
+  declareWinner: (teamId: string) => void;
+  archiveEvent: () => void;
   adjustScore: (teamId: string, delta: number) => void;
   setTeamStatus: (teamId: string, disqualified: boolean) => void;
 }) {
@@ -475,6 +496,7 @@ function AdminView(props: {
     duration: props.state.duration,
     questionCount: props.state.questionCount,
     tableLimit: props.state.tableLimit,
+    prizeLabel: props.state.prizeLabel,
   });
 
   useEffect(() => {
@@ -484,8 +506,9 @@ function AdminView(props: {
       duration: props.state.duration,
       questionCount: props.state.questionCount,
       tableLimit: props.state.tableLimit,
+      prizeLabel: props.state.prizeLabel,
     });
-  }, [props.state.difficulty, props.state.duration, props.state.questionCount, props.state.tableLimit, props.state.title]);
+  }, [props.state.difficulty, props.state.duration, props.state.prizeLabel, props.state.questionCount, props.state.tableLimit, props.state.title]);
 
   if (!props.adminAuthed) {
     return (
@@ -507,6 +530,9 @@ function AdminView(props: {
 
   const setupLocked = !["vote", "ready"].includes(props.state.phase);
   const answeredCount = props.state.question ? props.state.teams.filter((team) => team.answeredQuestionId === props.state.question?.id).length : 0;
+  const winner = props.state.teams.find((team) => team.id === props.state.winnerTeamId) ?? [...props.state.teams].sort((a, b) => Number(a.disqualified) - Number(b.disqualified) || b.score - a.score)[0];
+  const adminUrl = `${props.baseEventUrl}/admin${props.state.adminKey ? `?key=${encodeURIComponent(props.state.adminKey)}` : ""}`;
+  const resultsUrl = `/api/events/${props.state.id}/results?key=${encodeURIComponent(props.adminPin)}`;
   const suspiciousTeams = props.state.teams
     .filter((team) => team.violations > 0 || team.reconnects > 2 || team.disqualified)
     .sort((a, b) => b.violations - a.violations || b.reconnects - a.reconnects);
@@ -517,6 +543,11 @@ function AdminView(props: {
         <div className="panelTitle">
           <Gauge size={20} />
           <h2>Host Controls</h2>
+        </div>
+        <div className="launchStrip">
+          <span>Launch ready</span>
+          <strong>{props.state.teams.length}/{props.state.tableLimit} tables</strong>
+          <strong>{props.state.prizeLabel}</strong>
         </div>
         <div className="hostStatus">
           <span>{props.state.phase}</span>
@@ -563,6 +594,10 @@ function AdminView(props: {
             <input value={setup.title} onChange={(event) => setSetup({ ...setup, title: event.target.value })} disabled={setupLocked} />
           </label>
           <label>
+            <span>Prize</span>
+            <input value={setup.prizeLabel} onChange={(event) => setSetup({ ...setup, prizeLabel: event.target.value })} disabled={setupLocked} />
+          </label>
+          <label>
             <span>Difficulty</span>
             <select value={setup.difficulty} onChange={(event) => setSetup({ ...setup, difficulty: event.target.value as Difficulty })} disabled={setupLocked}>
               <option value="easy">Easy</option>
@@ -597,15 +632,59 @@ function AdminView(props: {
       <section className="panel">
         <div className="panelTitle">
           <LinkIcon size={20} />
-          <h2>Event Links</h2>
+          <h2>Launch Lobby</h2>
+        </div>
+        <div className="adminQr">
+          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`${props.baseEventUrl}/join`)}`} alt="Join QR code" />
+          <div>
+            <p className="eyebrow">Audience QR</p>
+            <h2>{props.state.teams.length} joined</h2>
+            <p className="statusLine">Category: {props.state.categories[props.state.selectedCategory].label}</p>
+          </div>
         </div>
         <div className="linkStack">
           <a href={`${props.baseEventUrl}/join`}>Player QR link</a>
           <a href={`${props.baseEventUrl}/tv`}>TV screen link</a>
-          <a href={`${props.baseEventUrl}/admin`}>Admin link</a>
+          <a href={adminUrl}>Secure admin link</a>
         </div>
         <p className="selectedLine">Leading: {props.state.categories[props.state.selectedCategory].label}</p>
         <VoteBars categories={props.state.categories} votes={props.state.votes} />
+      </section>
+
+      <section className="panel">
+        <div className="panelTitle">
+          <BarChart3 size={20} />
+          <h2>Venue Status</h2>
+        </div>
+        <div className="statusGrid">
+          <span>Database <strong>{props.state.venueStatus.persistence}</strong></span>
+          <span>Socket <strong>{props.state.venueStatus.websocket}</strong></span>
+          <span>Devices <strong>{props.state.venueStatus.connectedDevices}</strong></span>
+          <span>Cache <strong>{props.state.venueStatus.questionCacheReady ? "Ready" : "Warming"}</strong></span>
+        </div>
+        <p className="statusLine">Server uptime: {Math.floor(props.state.venueStatus.uptime / 60)}m {props.state.venueStatus.uptime % 60}s</p>
+      </section>
+
+      <section className="panel">
+        <div className="panelTitle">
+          <Trophy size={20} />
+          <h2>Prize & Results</h2>
+        </div>
+        <p className="selectedLine">Winner: {winner?.name ?? "No tables yet"}</p>
+        <div className="actionRow">
+          {props.state.teams.slice().sort((a, b) => Number(a.disqualified) - Number(b.disqualified) || b.score - a.score).slice(0, 4).map((team) => (
+            <button className="secondaryAction" key={team.id} onClick={() => props.declareWinner(team.id)}>
+              <Crown size={18} /> {team.name}
+            </button>
+          ))}
+          <a className="secondaryLink" href={resultsUrl} target="_blank" rel="noreferrer">
+            <Download size={18} /> Export
+          </a>
+          <button className="secondaryAction" onClick={props.archiveEvent} disabled={Boolean(props.state.archivedAt)}>
+            <Square size={18} /> {props.state.archivedAt ? "Archived" : "Archive"}
+          </button>
+        </div>
+        {props.state.finalizedAt && <p className="statusLine">Finalized: {new Date(props.state.finalizedAt).toLocaleString()}</p>}
       </section>
 
       <section className="panel">

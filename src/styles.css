@@ -135,6 +135,13 @@ h2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.adminGrid .panel:nth-child(3),
+.adminGrid .panel:nth-child(4),
+.adminGrid .panel:nth-child(5),
+.adminGrid .panel:nth-child(6) {
+  min-width: 0;
+}
+
 .tvLayout {
   grid-template-columns: 1fr 340px;
 }
@@ -461,7 +468,8 @@ select {
 }
 
 .hostStatus,
-.watchSummary {
+.watchSummary,
+.launchStrip {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -470,7 +478,10 @@ select {
 
 .hostStatus span,
 .hostStatus strong,
-.watchSummary span {
+.watchSummary span,
+.launchStrip span,
+.launchStrip strong,
+.statusGrid span {
   min-height: 34px;
   border-radius: 8px;
   display: inline-flex;
@@ -483,13 +494,19 @@ select {
   text-transform: capitalize;
 }
 
+.launchStrip {
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
 .setupGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.setupGrid label:first-child {
+.setupGrid label:first-child,
+.setupGrid label:nth-child(2) {
   grid-column: 1 / -1;
 }
 
@@ -507,6 +524,42 @@ select {
 
 .teamRow small {
   margin-top: 4px;
+}
+
+.adminQr {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.adminQr img {
+  width: 132px;
+  height: 132px;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+}
+
+.adminQr h2 {
+  font-size: clamp(1.6rem, 3vw, 2.6rem);
+  line-height: 1;
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.statusGrid span {
+  justify-content: space-between;
+  text-transform: none;
+}
+
+.statusGrid strong {
+  color: #f4c95d;
 }
 
 @media (max-width: 920px) {
