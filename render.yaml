@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: table-rush-trivia
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /readyz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST_PIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PGSSLMODE
+        value: require
+      - key: ALLOWED_ORIGINS
+        sync: false

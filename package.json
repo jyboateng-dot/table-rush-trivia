@@ -1,0 +1,28 @@
+{
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "start": "node server/index.js",
+    "db:check": "node server/check-db.js"
+  },
+  "dependencies": {
+    "@socket.io/postgres-adapter": "^0.5.0",
+    "@vitejs/plugin-react": "latest",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "lucide-react": "latest",
+    "pg": "^8.23.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4"
+  }
+}
